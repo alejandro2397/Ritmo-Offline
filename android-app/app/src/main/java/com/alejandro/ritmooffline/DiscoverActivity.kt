@@ -25,6 +25,7 @@ class DiscoverActivity : ComponentActivity() {
     private lateinit var results: LinearLayout
     private lateinit var status: TextView
     private lateinit var searchBox: EditText
+    private lateinit var personalizedRow: LinearLayout
 
     data class Song(val id: String, val title: String, val creator: String, val license: String)
 
@@ -62,6 +63,18 @@ class DiscoverActivity : ComponentActivity() {
                 LinearLayout.LayoutParams(-2, dp(40)).apply { rightMargin = dp(7) })
         }
         root.addView(HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(genreRow) })
+        root.addView(text("Tendencias para explorar", 17f, white, true).apply { setPadding(0, dp(16), 0, dp(8)) })
+        val trendingRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        listOf("Lo-fi beats", "Cumbia", "EDM", "Hip hop", "Jazz").forEach { term ->
+            trendingRow.addView(button(term, Color.rgb(54, 29, 29), white) {
+                searchBox.setText(term); searchMusic(term)
+            }, LinearLayout.LayoutParams(-2, dp(38)).apply { rightMargin = dp(7) })
+        }
+        root.addView(HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(trendingRow) })
+        root.addView(text("Para ti · búsquedas recientes", 17f, white, true).apply { setPadding(0, dp(15), 0, dp(7)) })
+        personalizedRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        root.addView(HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(personalizedRow) })
+        refreshPersonalized()
         status = text("Buscando música con licencia abierta…", 12f, muted, false).apply { setPadding(0, dp(14), 0, dp(8)) }
         root.addView(status)
         val scroll = ScrollView(this).apply { isFillViewport = false; isVerticalScrollBarEnabled = true }
@@ -77,6 +90,8 @@ class DiscoverActivity : ComponentActivity() {
 
     private fun searchMusic(term: String) {
         val q = term.ifBlank { "electronic dance" }
+        rememberSearch(q)
+        refreshPersonalized()
         status.text = "Buscando \"" + q + "\"…"
         results.removeAllViews()
         Thread {
@@ -110,6 +125,26 @@ class DiscoverActivity : ComponentActivity() {
                 runOnUiThread { status.text = "No se pudo conectar. Revisa tu internet e inténtalo otra vez." }
             }
         }.start()
+    }
+
+    private fun rememberSearch(term: String) {
+        val prefs = getSharedPreferences("ritmo_discovery", Context.MODE_PRIVATE)
+        val old = prefs.getString("recent_searches", "").orEmpty().split("||").filter { it.isNotBlank() }
+        val updated = (listOf(term.trim()) + old.filterNot { it.equals(term.trim(), true) }).take(5)
+        prefs.edit().putString("recent_searches", updated.joinToString("||")).apply()
+    }
+
+    private fun refreshPersonalized() {
+        if (!::personalizedRow.isInitialized) return
+        personalizedRow.removeAllViews()
+        val recent = getSharedPreferences("ritmo_discovery", Context.MODE_PRIVATE)
+            .getString("recent_searches", "").orEmpty().split("||").filter { it.isNotBlank() }.take(5)
+        val suggestions = if (recent.isEmpty()) listOf("Electronic dance", "Cumbia", "Lo-fi") else recent
+        suggestions.forEach { term ->
+            personalizedRow.addView(button(term, panel, white) {
+                searchBox.setText(term); searchMusic(term)
+            }, LinearLayout.LayoutParams(-2, dp(38)).apply { rightMargin = dp(7) })
+        }
     }
 
     private fun addSongCard(song: Song) {
