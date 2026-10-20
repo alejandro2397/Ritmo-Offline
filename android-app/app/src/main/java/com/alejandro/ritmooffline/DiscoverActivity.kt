@@ -106,8 +106,13 @@ class DiscoverActivity : ComponentActivity() {
             if (jamendoPrefs.getString("client_id", "").isNullOrBlank()) configureJamendo()
             else if (albumMode) searchAlbums(searchBox.text.toString().ifBlank { "novedades" }) else searchMusic(searchBox.text.toString().ifBlank { "trending" })
         }, LinearLayout.LayoutParams(0, dp(40), 1f).apply { leftMargin = dp(5); rightMargin = dp(5) })
+        sourceRow.addView(button("Deezer", Color.rgb(25, 45, 100), white) {
+            provider = "Deezer"
+            if (albumMode) searchAlbums(searchBox.text.toString().ifBlank { "new releases" })
+            else searchMusic(searchBox.text.toString().ifBlank { "trending" })
+        }, LinearLayout.LayoutParams(0, dp(40), 1f).apply { leftMargin = dp(5); rightMargin = dp(5) })
         sourceRow.addView(button("⚙ ID", panel, white) { configureJamendo() },
-            LinearLayout.LayoutParams(dp(72), dp(40)).apply { leftMargin = dp(5) })
+            LinearLayout.LayoutParams(dp(60), dp(40)).apply { leftMargin = dp(5) })
         root.addView(sourceRow)
         genreSection = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         genreSection.addView(text("Explora por estilo", 17f, white, true).apply { setPadding(0, dp(16), 0, dp(8)) })
@@ -203,6 +208,34 @@ class DiscoverActivity : ComponentActivity() {
             try {
                 val encoded = URLEncoder.encode(q, "UTF-8")
                 val genreNames = setOf("Pop", "Latin", "Electronic", "Hip-Hop/Rap", "Rock", "Reggaeton", "Cumbia", "House", "Techno", "Trap", "R&B/Soul", "Reggae", "Dancehall", "Disco", "Jazz", "Classical", "Metal", "Alternative", "Punk", "Folk", "Country", "Blues", "Funk", "Acoustic", "Ambient", "Soundtrack", "Lo-Fi", "Hyperpop", "Trance", "Drum & Bass", "Dubstep", "Hardstyle", "Deep House", "Tech House", "Progressive House", "Future Bass", "Tropical House", "Jungle", "Vaporwave", "World", "Experimental", "Devotional", "Podcasts", "Comedy", "Kids", "Audiobooks")
+                if (provider == "Deezer") {
+                    val endpoint = "https://api.deezer.com/search/track?q=" + URLEncoder.encode(
+                        if (q.equals("trending", true) || q.equals("Novedades", true)) "chart" else q, "UTF-8") + "&limit=25"
+                    connection = URL(endpoint).openConnection() as HttpURLConnection
+                    connection.connectTimeout = 15000; connection.readTimeout = 15000
+                    connection.setRequestProperty("User-Agent", "RitmoOffline/1.0 (Android)")
+                    val deezerJson = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+                    val data = deezerJson.optJSONArray("data")
+                    val songs = mutableListOf<Song>()
+                    if (data != null) for (i in 0 until data.length()) {
+                        val item = data.optJSONObject(i) ?: continue
+                        val preview = item.optString("preview", "")
+                        if (item.optString("id").isBlank() || !preview.startsWith("https://")) continue
+                        val artist = item.optJSONObject("artist")?.optString("name", "Artista") ?: "Artista"
+                        val album = item.optJSONObject("album")
+                        songs.add(Song(item.optString("id"), item.optString("title", "Audio sin título"),
+                            artist, album?.optString("cover_medium", "").orEmpty(), item.optInt("duration"),
+                            "Deezer · vista previa", preview))
+                    }
+                    runOnUiThread {
+                        if (songs.isEmpty()) status.text = "Deezer no devolvió vistas previas. Prueba otra búsqueda."
+                        else {
+                            status.text = songs.size.toString() + " resultados de Deezer · vistas previas de unos 30 s"
+                            songs.forEach { addSongCard(it) }
+                        }
+                    }
+                    return@Thread
+                }
                 if (provider == "Jamendo") {
                     val clientId = jamendoPrefs.getString("client_id", "").orEmpty()
                     if (clientId.isBlank()) {
@@ -295,6 +328,32 @@ class DiscoverActivity : ComponentActivity() {
         Thread {
             var connection: HttpURLConnection? = null
             try {
+                if (provider == "Deezer") {
+                    val endpoint = "https://api.deezer.com/search/album?q=" +
+                        URLEncoder.encode(if (q.equals("new releases", true) || q.equals("novedades", true)) "chart" else q, "UTF-8") + "&limit=25"
+                    connection = URL(endpoint).openConnection() as HttpURLConnection
+                    connection.connectTimeout = 15000; connection.readTimeout = 15000
+                    connection.setRequestProperty("User-Agent", "RitmoOffline/1.0 (Android)")
+                    val deezerJson = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+                    val data = deezerJson.optJSONArray("data")
+                    val albums = mutableListOf<Album>()
+                    if (data != null) for (i in 0 until data.length()) {
+                        val item = data.optJSONObject(i) ?: continue
+                        val id = item.optString("id", "")
+                        if (id.isBlank()) continue
+                        val artist = item.optJSONObject("artist")?.optString("name", "Artista") ?: "Artista"
+                        albums.add(Album(id, item.optString("title", "Álbum"), artist,
+                            item.optString("cover_medium", ""), item.optInt("nb_tracks"), "Deezer"))
+                    }
+                    runOnUiThread {
+                        if (albums.isEmpty()) status.text = "Deezer no devolvió álbumes para esta búsqueda."
+                        else {
+                            status.text = albums.size.toString() + " álbumes de Deezer · reproducción en vistas previas"
+                            albums.forEach { addAlbumCard(it) }
+                        }
+                    }
+                    return@Thread
+                }
                 if (provider == "Jamendo") {
                     val clientId = jamendoPrefs.getString("client_id", "").orEmpty()
                     if (clientId.isBlank()) {
@@ -389,7 +448,9 @@ class DiscoverActivity : ComponentActivity() {
         Thread {
             var connection: HttpURLConnection? = null
             try {
-                val endpoint = if (album.provider == "Jamendo") {
+                val endpoint = if (album.provider == "Deezer") {
+                    "https://api.deezer.com/album/" + Uri.encode(album.id) + "/tracks?limit=100"
+                } else if (album.provider == "Jamendo") {
                     val clientId = jamendoPrefs.getString("client_id", "").orEmpty()
                     "https://api.jamendo.com/v3.0/tracks/?client_id=" + URLEncoder.encode(clientId, "UTF-8") +
                         "&format=json&limit=100&audioformat=mp32&imagesize=300&album_id=" + Uri.encode(album.id) + "&order=id_asc"
@@ -405,12 +466,15 @@ class DiscoverActivity : ComponentActivity() {
                     if (id.isBlank()) continue
                     val title = track.optString(if (album.provider == "Jamendo") "name" else "title", "Audio sin título")
                     val artist = if (album.provider == "Jamendo") track.optString("artist_name", "Artista independiente")
+                        else if (album.provider == "Deezer") track.optJSONObject("artist")?.optString("name", "Artista independiente") ?: "Artista independiente"
                         else track.optJSONObject("user")?.optString("name", "Artista independiente") ?: "Artista independiente"
                     val artwork = if (album.provider == "Jamendo") track.optString("album_image", track.optString("image", ""))
+                        else if (album.provider == "Deezer") track.optJSONObject("album")?.optString("cover_medium", "").orEmpty()
                         else track.optJSONObject("artwork")?.optString("150x150", "").orEmpty()
                     val metadata = MediaMetadata.Builder().setTitle(title).setArtist(artist)
                         .apply { if (artwork.startsWith("https://")) setArtworkUri(Uri.parse(artwork)) }.build()
                     val stream = if (album.provider == "Jamendo") track.optString("audio", "")
+                        else if (album.provider == "Deezer") track.optString("preview", "")
                         else "https://api.audius.co/v1/tracks/" + Uri.encode(id) + "/stream?app_name=RitmoOffline"
                     if (!stream.startsWith("https://")) continue
                     val uri = Uri.parse(stream)
@@ -446,7 +510,8 @@ class DiscoverActivity : ComponentActivity() {
         info.addView(text(song.creator, 11f, muted, false).apply {
             setPadding(0, dp(3), 0, 0); maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END
         })
-        val duration = if (song.duration > 0) String.format("%d:%02d", song.duration / 60, song.duration % 60) else "Streaming"
+        val duration = if (song.streamUrl.contains("deezer.com", true) || song.genre.contains("vista previa", true)) "Vista previa · ~30 s"
+            else if (song.duration > 0) String.format("%d:%02d", song.duration / 60, song.duration % 60) else "Streaming"
         info.addView(text((if (song.genre.isNotBlank()) song.genre + " · " else "") + duration, 10f, Color.rgb(255, 130, 130), false)
             .apply { setPadding(0, dp(3), 0, 0) })
         card.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
