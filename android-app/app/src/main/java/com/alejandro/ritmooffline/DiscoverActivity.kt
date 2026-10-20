@@ -36,6 +36,7 @@ class DiscoverActivity : ComponentActivity() {
     private var albumMode = false
     private var provider = "Audius"
     private val jamendoPrefs by lazy { getSharedPreferences("ritmo_jamendo", MODE_PRIVATE) }
+    private val soundCloudPrefs by lazy { getSharedPreferences("ritmo_soundcloud", MODE_PRIVATE) }
     private lateinit var genreSection: LinearLayout
     private lateinit var trendSection: LinearLayout
 
@@ -111,9 +112,26 @@ class DiscoverActivity : ComponentActivity() {
             if (albumMode) searchAlbums(searchBox.text.toString().ifBlank { "new releases" })
             else searchMusic(searchBox.text.toString().ifBlank { "trending" })
         }, LinearLayout.LayoutParams(0, dp(40), 1f).apply { leftMargin = dp(5); rightMargin = dp(5) })
-        sourceRow.addView(button("⚙ ID", panel, white) { configureJamendo() },
-            LinearLayout.LayoutParams(dp(60), dp(40)).apply { leftMargin = dp(5) })
         root.addView(sourceRow)
+        val extraSourceRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(5), 0, dp(2)) }
+        extraSourceRow.addView(button("SoundCloud", Color.rgb(255, 105, 0), Color.BLACK) {
+            provider = "SoundCloud"
+            if (soundCloudPrefs.getString("client_id", "").isNullOrBlank()) configureSoundCloud()
+            else if (albumMode) {
+                albumMode = false
+                genreSection.visibility = android.view.View.VISIBLE
+                trendSection.visibility = android.view.View.VISIBLE
+                searchMusic(searchBox.text.toString().ifBlank { "trending" })
+            } else searchMusic(searchBox.text.toString().ifBlank { "trending" })
+        }, LinearLayout.LayoutParams(0, dp(38), 1f).apply { rightMargin = dp(5) })
+        extraSourceRow.addView(button("⚙ IDs", panel, white) {
+            android.app.AlertDialog.Builder(this)
+                .setTitle("Configurar catálogos")
+                .setItems(arrayOf("Configurar Jamendo", "Configurar SoundCloud")) { _, which ->
+                    if (which == 0) configureJamendo() else configureSoundCloud()
+                }.show()
+        }, LinearLayout.LayoutParams(dp(100), dp(38)).apply { leftMargin = dp(5) })
+        root.addView(extraSourceRow)
         genreSection = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         genreSection.addView(text("Explora por estilo", 17f, white, true).apply { setPadding(0, dp(16), 0, dp(8)) })
         val genreRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
@@ -208,6 +226,54 @@ class DiscoverActivity : ComponentActivity() {
             try {
                 val encoded = URLEncoder.encode(q, "UTF-8")
                 val genreNames = setOf("Pop", "Latin", "Electronic", "Hip-Hop/Rap", "Rock", "Reggaeton", "Cumbia", "House", "Techno", "Trap", "R&B/Soul", "Reggae", "Dancehall", "Disco", "Jazz", "Classical", "Metal", "Alternative", "Punk", "Folk", "Country", "Blues", "Funk", "Acoustic", "Ambient", "Soundtrack", "Lo-Fi", "Hyperpop", "Trance", "Drum & Bass", "Dubstep", "Hardstyle", "Deep House", "Tech House", "Progressive House", "Future Bass", "Tropical House", "Jungle", "Vaporwave", "World", "Experimental", "Devotional", "Podcasts", "Comedy", "Kids", "Audiobooks")
+                if (provider == "SoundCloud") {
+                    val clientId = soundCloudPrefs.getString("client_id", "").orEmpty()
+                    if (clientId.isBlank()) {
+                        runOnUiThread { status.text = "Configura el client_id de SoundCloud con ⚙ IDs." }
+                        return@Thread
+                    }
+                    val endpoint = "https://api.soundcloud.com/tracks?q=" + encoded +
+                        "&limit=25&access=playable&client_id=" + URLEncoder.encode(clientId, "UTF-8")
+                    connection = URL(endpoint).openConnection() as HttpURLConnection
+                    connection.connectTimeout = 15000; connection.readTimeout = 15000
+                    connection.setRequestProperty("User-Agent", "RitmoOffline/1.0 (Android)")
+                    val response = connection.inputStream.bufferedReader().use { it.readText() }
+                    val data = org.json.JSONArray(response)
+                    val tracks = mutableListOf<Song>()
+                    for (i in 0 until data.length()) {
+                        val item = data.optJSONObject(i) ?: continue
+                        if (!item.optBoolean("streamable", false)) continue
+                        val id = item.optString("id", "")
+                        var stream = item.optString("stream_url", "")
+                        if (stream.isBlank()) {
+                            val transcodings = item.optJSONObject("media")?.optJSONArray("transcodings")
+                            if (transcodings != null) for (j in 0 until transcodings.length()) {
+                                val trans = transcodings.optJSONObject(j) ?: continue
+                                val format = trans.optJSONObject("format")
+                                if (format?.optString("protocol") == "progressive") {
+                                    stream = trans.optString("url", "")
+                                    break
+                                }
+                            }
+                        }
+                        if (id.isBlank() || !stream.startsWith("https://")) continue
+                        if (!stream.contains("client_id=")) stream += (if (stream.contains("?")) "&" else "?") +
+                            "client_id=" + URLEncoder.encode(clientId, "UTF-8")
+                        val user = item.optJSONObject("user")
+                        val artwork = item.optString("artwork_url", "").replace("-large", "-t500x500")
+                        tracks.add(Song(id, item.optString("title", "Audio sin título"),
+                            user?.optString("username", "SoundCloud") ?: "SoundCloud",
+                            artwork, item.optInt("duration") / 1000, "SoundCloud · reproducción disponible", stream))
+                    }
+                    runOnUiThread {
+                        if (tracks.isEmpty()) status.text = "SoundCloud no devolvió pistas reproducibles con este acceso. Comprueba el client_id o prueba otra búsqueda."
+                        else {
+                            status.text = tracks.size.toString() + " pistas reproducibles de SoundCloud · duración completa cuando el artista la permite"
+                            tracks.forEach { addSongCard(it) }
+                        }
+                    }
+                    return@Thread
+                }
                 if (provider == "Deezer") {
                     val endpoint = "https://api.deezer.com/search/track?q=" + URLEncoder.encode(
                         if (q.equals("trending", true) || q.equals("Novedades", true)) "chart" else q, "UTF-8") + "&limit=25"
@@ -266,7 +332,7 @@ class DiscoverActivity : ComponentActivity() {
                     runOnUiThread {
                         if (jamSongs.isEmpty()) status.text = "Jamendo no devolvió pistas. Comprueba el client_id o prueba otro término."
                         else {
-                            status.text = jamSongs.size.toString() + " pistas de Jamendo · streaming"
+                            status.text = jamSongs.size.toString() + " pistas de Jamendo · streaming completo según licencia y disponibilidad"
                             jamSongs.forEach { addSongCard(it) }
                         }
                     }
@@ -295,7 +361,7 @@ class DiscoverActivity : ComponentActivity() {
                 if (data != null) for (i in 0 until data.length()) {
                     val item = data.optJSONObject(i) ?: continue
                     val id = item.optString("id", "")
-                    if (id.isBlank()) continue
+                    if (id.isBlank() || (item.has("is_streamable") && !item.optBoolean("is_streamable", false))) continue
                     val user = item.optJSONObject("user")
                     val artworkObject = item.optJSONObject("artwork")
                     val artwork = artworkObject?.optString("150x150", "")?.takeIf { it.startsWith("https://") }
@@ -309,7 +375,7 @@ class DiscoverActivity : ComponentActivity() {
                 runOnUiThread {
                     if (found.isEmpty()) status.text = "No encontramos pistas para \"" + q + "\". Prueba otro término."
                     else {
-                        status.text = found.size.toString() + " pistas · reproducción por internet"
+                        status.text = found.size.toString() + " pistas de Audius disponibles para streaming · priorizando reproducción completa"
                         found.forEach { addSongCard(it) }
                     }
                 }
@@ -569,6 +635,43 @@ class DiscoverActivity : ComponentActivity() {
                 if (value.isBlank()) status.text = "Jamendo aún no está configurado."
                 else if (albumMode) searchAlbums(searchBox.text.toString().ifBlank { "novedades" })
                 else searchMusic(searchBox.text.toString().ifBlank { "Novedades" })
+            }
+            .show()
+    }
+
+    private fun configureSoundCloud() {
+        val input = EditText(this).apply {
+            hint = "Pega aquí tu client_id de SoundCloud"
+            setSingleLine(true)
+            setText(soundCloudPrefs.getString("client_id", "").orEmpty())
+            setTextColor(white)
+            setHintTextColor(muted)
+            background = rounded(panel, 12)
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+        }
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(8), dp(8), dp(8), 0)
+            addView(input, LinearLayout.LayoutParams(-1, dp(52)))
+            addView(text("Necesitas credenciales de desarrollador autorizadas por SoundCloud. Regístralas en developers.soundcloud.com; el acceso y el streaming dependen de los permisos de la aplicación.", 12f, muted, false).apply {
+                setPadding(0, dp(10), 0, 0)
+            })
+        }
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Configurar SoundCloud")
+            .setView(container)
+            .setNegativeButton("Cancelar", null)
+            .setPositiveButton("Guardar") { _, _ ->
+                val value = input.text.toString().trim()
+                soundCloudPrefs.edit().putString("client_id", value).apply()
+                provider = "SoundCloud"
+                if (value.isBlank()) status.text = "SoundCloud aún no está configurado."
+                else {
+                    albumMode = false
+                    genreSection.visibility = android.view.View.VISIBLE
+                    trendSection.visibility = android.view.View.VISIBLE
+                    searchMusic(searchBox.text.toString().ifBlank { "trending" })
+                }
             }
             .show()
     }
