@@ -33,6 +33,11 @@ class DiscoverActivity : ComponentActivity() {
     private lateinit var personalizedRow: LinearLayout
     private lateinit var nowPlaying: TextView
     private var controller: MediaController? = null
+    private var albumMode = false
+    private lateinit var genreSection: LinearLayout
+    private lateinit var trendSection: LinearLayout
+
+    data class Album(val id: String, val title: String, val creator: String, val artwork: String, val trackCount: Int)
 
     data class Song(
         val id: String,
@@ -69,24 +74,44 @@ class DiscoverActivity : ComponentActivity() {
             background = rounded(panel, 15); imeOptions = EditorInfo.IME_ACTION_SEARCH
         }
         root.addView(searchBox, LinearLayout.LayoutParams(-1, dp(52)))
-        root.addView(button("Buscar música", red, white) { searchMusic(searchBox.text.toString().trim()) },
+        root.addView(button("Buscar", red, white) { if (albumMode) searchAlbums(searchBox.text.toString().trim()) else searchMusic(searchBox.text.toString().trim()) },
             LinearLayout.LayoutParams(-1, dp(46)).apply { topMargin = dp(8) })
-        root.addView(text("Explora por estilo", 17f, white, true).apply { setPadding(0, dp(16), 0, dp(8)) })
+        val modeRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(10), 0, dp(2)) }
+        modeRow.addView(button("♫ Canciones", panel, white) {
+            albumMode = false
+            searchBox.hint = "Busca canción, artista o género"
+            genreSection.visibility = android.view.View.VISIBLE
+            trendSection.visibility = android.view.View.VISIBLE
+            searchMusic(searchBox.text.toString().ifBlank { "trending" })
+        }, LinearLayout.LayoutParams(0, dp(42), 1f).apply { rightMargin = dp(6) })
+        modeRow.addView(button("▣ Álbumes", Color.rgb(80, 25, 25), white) {
+            albumMode = true
+            searchBox.hint = "Busca álbum o artista"
+            genreSection.visibility = android.view.View.GONE
+            trendSection.visibility = android.view.View.GONE
+            searchAlbums(searchBox.text.toString().ifBlank { "new releases" })
+        }, LinearLayout.LayoutParams(0, dp(42), 1f).apply { leftMargin = dp(6) })
+        root.addView(modeRow)
+        genreSection = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        genreSection.addView(text("Explora por estilo", 17f, white, true).apply { setPadding(0, dp(16), 0, dp(8)) })
         val genreRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         listOf("Pop", "Latin", "Electronic", "Hip-Hop/Rap", "Rock", "Reggaeton", "Cumbia", "House", "Techno", "Trap", "R&B/Soul", "Reggae", "Dancehall", "Disco", "Jazz", "Classical", "Metal", "Alternative", "Punk", "Folk", "Country", "Blues", "Funk", "Acoustic", "Ambient", "Soundtrack", "Lo-Fi", "Hyperpop", "Trance", "Drum & Bass", "Dubstep", "Hardstyle", "Deep House", "Tech House", "Progressive House", "Future Bass", "Tropical House", "Jungle", "Vaporwave", "World", "Experimental", "Devotional", "Podcasts", "Comedy", "Kids", "Audiobooks").forEach { genre ->
             genreRow.addView(button(genre, panel, white) {
                 searchBox.setText(genre); searchMusic(genre)
             }, LinearLayout.LayoutParams(-2, dp(38)).apply { rightMargin = dp(7) })
         }
-        root.addView(HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(genreRow) })
-        root.addView(text("Tendencias para explorar", 17f, white, true).apply { setPadding(0, dp(14), 0, dp(8)) })
+        genreSection.addView(HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(genreRow) })
+        root.addView(genreSection)
+        trendSection = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        trendSection.addView(text("Tendencias para explorar", 17f, white, true).apply { setPadding(0, dp(14), 0, dp(8)) })
         val trendingRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         listOf("Novedades", "Tendencias de la semana", "Trending", "Electronic dance", "Cumbia", "EDM", "Latin").forEach { term ->
             trendingRow.addView(button(term, Color.rgb(54, 29, 29), white) {
                 searchBox.setText(term); searchMusic(term)
             }, LinearLayout.LayoutParams(-2, dp(38)).apply { rightMargin = dp(7) })
         }
-        root.addView(HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(trendingRow) })
+        trendSection.addView(HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(trendingRow) })
+        root.addView(trendSection)
         root.addView(text("Para ti · búsquedas recientes", 17f, white, true).apply { setPadding(0, dp(14), 0, dp(7)) })
         personalizedRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         root.addView(HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(personalizedRow) })
@@ -117,7 +142,7 @@ class DiscoverActivity : ComponentActivity() {
         }, LinearLayout.LayoutParams(dp(48), dp(44)))
         root.addView(player, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
         searchBox.setOnEditorActionListener { _, action, _ ->
-            if (action == EditorInfo.IME_ACTION_SEARCH) { searchMusic(searchBox.text.toString().trim()); true } else false
+            if (action == EditorInfo.IME_ACTION_SEARCH) { if (albumMode) searchAlbums(searchBox.text.toString().trim()) else searchMusic(searchBox.text.toString().trim()); true } else false
         }
         setContentView(root)
         searchMusic("trending")
@@ -207,6 +232,107 @@ class DiscoverActivity : ComponentActivity() {
             } finally {
                 connection?.disconnect()
             }
+        }.start()
+    }
+
+    private fun searchAlbums(term: String) {
+        val q = term.ifBlank { "new releases" }
+        status.text = "Buscando álbumes en línea…"
+        results.removeAllViews()
+        Thread {
+            var connection: HttpURLConnection? = null
+            try {
+                val endpoint = if (q.equals("new releases", true) || q.equals("novedades", true))
+                    "https://api.audius.co/v1/playlists/new-releases?limit=25&app_name=RitmoOffline"
+                else
+                    "https://api.audius.co/v1/playlists/search?query=" + URLEncoder.encode(q, "UTF-8") + "&limit=25&app_name=RitmoOffline"
+                connection = URL(endpoint).openConnection() as HttpURLConnection
+                connection.connectTimeout = 15000; connection.readTimeout = 15000
+                connection.setRequestProperty("User-Agent", "RitmoOffline/1.0 (Android)")
+                val json = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+                val data = json.optJSONArray("data")
+                val found = mutableListOf<Album>()
+                if (data != null) for (i in 0 until data.length()) {
+                    val item = data.optJSONObject(i) ?: continue
+                    if (item.optBoolean("is_album", item.optBoolean("isAlbum", false)).not()) continue
+                    val id = item.optString("id", "")
+                    if (id.isBlank()) continue
+                    val user = item.optJSONObject("user")
+                    val art = item.optJSONObject("artwork")
+                    val artwork = art?.optString("150x150", "")?.takeIf { it.startsWith("https://") }
+                        ?: art?.optString("480x480", "")?.takeIf { it.startsWith("https://") }.orEmpty()
+                    val contents = item.optJSONArray("playlist_contents")
+                    found.add(Album(id, item.optString("playlist_name", item.optString("title", "Álbum sin título")),
+                        user?.optString("name", "Artista independiente") ?: "Artista independiente",
+                        artwork, contents?.length() ?: item.optInt("track_count", 0)))
+                }
+                runOnUiThread {
+                    if (found.isEmpty()) status.text = "No encontramos álbumes para \"" + q + "\". Prueba otro artista o término."
+                    else {
+                        status.text = found.size.toString() + " álbumes · pulsa uno para reproducirlo"
+                        found.forEach { addAlbumCard(it) }
+                    }
+                }
+            } catch (_: Exception) {
+                runOnUiThread { status.text = "No se pudieron cargar los álbumes. Revisa internet e inténtalo de nuevo." }
+            } finally { connection?.disconnect() }
+        }.start()
+    }
+
+    private fun addAlbumCard(album: Album) {
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            background = rounded(panel, 16); setPadding(dp(10), dp(10), dp(10), dp(10))
+        }
+        val cover = text("▣", 22f, white, true).apply {
+            gravity = Gravity.CENTER; background = rounded(Color.rgb(78, 28, 28), 12)
+        }
+        card.addView(cover, LinearLayout.LayoutParams(dp(64), dp(64)))
+        val info = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(10), 0, dp(6), 0) }
+        info.addView(text(album.title, 14f, white, true).apply { maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END })
+        info.addView(text(album.creator, 11f, muted, false).apply { setPadding(0, dp(3), 0, 0); maxLines = 1 })
+        info.addView(text("ÁLBUM" + if (album.trackCount > 0) " · " + album.trackCount + " pistas" else "", 10f, Color.rgb(255, 130, 130), false).apply { setPadding(0, dp(3), 0, 0) })
+        card.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
+        card.addView(button("▶", red, white) { playAlbum(album) }, LinearLayout.LayoutParams(dp(48), dp(44)))
+        card.setOnClickListener { playAlbum(album) }
+        results.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
+    }
+
+    private fun playAlbum(album: Album) {
+        status.text = "Cargando álbum: " + album.title + "…"
+        Thread {
+            var connection: HttpURLConnection? = null
+            try {
+                connection = URL("https://api.audius.co/v1/playlists/" + Uri.encode(album.id) + "/tracks?app_name=RitmoOffline").openConnection() as HttpURLConnection
+                connection.connectTimeout = 15000; connection.readTimeout = 20000
+                val json = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+                val data = json.optJSONArray("data")
+                val items = mutableListOf<MediaItem>()
+                if (data != null) for (i in 0 until data.length()) {
+                    val track = data.optJSONObject(i) ?: continue
+                    val id = track.optString("id", "")
+                    if (id.isBlank()) continue
+                    val title = track.optString("title", "Audio sin título")
+                    val artist = track.optJSONObject("user")?.optString("name", "Artista independiente") ?: "Artista independiente"
+                    val artwork = track.optJSONObject("artwork")?.optString("150x150", "").orEmpty()
+                    val metadata = MediaMetadata.Builder().setTitle(title).setArtist(artist)
+                        .apply { if (artwork.startsWith("https://")) setArtworkUri(Uri.parse(artwork)) }.build()
+                    val uri = Uri.parse("https://api.audius.co/v1/tracks/" + Uri.encode(id) + "/stream?app_name=RitmoOffline")
+                    items.add(MediaItem.Builder().setUri(uri).setMediaMetadata(metadata).build())
+                }
+                runOnUiThread {
+                    val c = controller
+                    if (items.isEmpty()) status.text = "Este álbum no tiene pistas disponibles para reproducir."
+                    else if (c == null) status.text = "El reproductor se está preparando. Toca el álbum otra vez."
+                    else {
+                        c.setMediaItems(items); c.prepare(); c.play()
+                        nowPlaying.text = album.title
+                        status.text = "Reproduciendo álbum por internet · " + items.size + " pistas"
+                    }
+                }
+            } catch (_: Exception) {
+                runOnUiThread { status.text = "No se pudo abrir este álbum. Prueba otro." }
+            } finally { connection?.disconnect() }
         }.start()
     }
 
