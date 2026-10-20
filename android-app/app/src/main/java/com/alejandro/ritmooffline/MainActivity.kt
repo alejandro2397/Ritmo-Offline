@@ -211,19 +211,13 @@ class MainActivity : ComponentActivity() {
         }
         root.addView(status)
 
-        val scroll = ScrollView(this).apply {
-            isFillViewport = true
-            isVerticalScrollBarEnabled = false
-            overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
-            clipToPadding = false
-            setPadding(0, 0, 0, dp(8))
-        }
         trackList = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(0, 0, 0, dp(12))
         }
-        scroll.addView(trackList, ViewGroup.LayoutParams(-1, -2))
-        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        // Keep the full page in one vertical scroll container so the header,
+        // hero, search, library, and player can all be reached on small screens.
+        root.addView(trackList, LinearLayout.LayoutParams(-1, -2))
 
         val playerCard = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -302,7 +296,15 @@ class MainActivity : ComponentActivity() {
         }, LinearLayout.LayoutParams(0, dp(44), 1f))
         playerCard.addView(controls)
         root.addView(playerCard, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
-        setContentView(root)
+        val pageScroll = ScrollView(this).apply {
+            isFillViewport = true
+            isVerticalScrollBarEnabled = true
+            overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
+            clipToPadding = false
+            setFillViewport(false)
+        }
+        pageScroll.addView(root, ScrollView.LayoutParams(-1, -2))
+        setContentView(pageScroll)
     }
 
     private fun label(value: String, size: Float, color: Int, bold: Boolean): TextView =
