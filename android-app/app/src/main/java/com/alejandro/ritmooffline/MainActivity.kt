@@ -53,12 +53,12 @@ class MainActivity : ComponentActivity() {
 
     private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
-    private val bg = Color.rgb(13, 12, 23)
-    private val panel = Color.rgb(25, 23, 41)
-    private val panelLight = Color.rgb(34, 30, 54)
-    private val purple = Color.rgb(167, 115, 255)
-    private val white = Color.rgb(248, 246, 255)
-    private val muted = Color.rgb(169, 163, 190)
+    private val bg = Color.rgb(15, 15, 15)
+    private val panel = Color.rgb(32, 32, 32)
+    private val panelLight = Color.rgb(47, 47, 47)
+    private val purple = Color.rgb(255, 55, 55)
+    private val white = Color.rgb(250, 250, 250)
+    private val muted = Color.rgb(170, 170, 170)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -124,7 +124,7 @@ class MainActivity : ComponentActivity() {
             textSize = 25f
             gravity = Gravity.CENTER
             setTextColor(Color.WHITE)
-            background = rounded(purple, 16)
+            background = rounded(Color.rgb(255, 0, 0), 16)
             typeface = Typeface.DEFAULT_BOLD
         }
         header.addView(logo, LinearLayout.LayoutParams(dp(48), dp(48)))
@@ -132,14 +132,14 @@ class MainActivity : ComponentActivity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(12), 0, 0, 0)
         }
-        branding.addView(label("RITMO", 20f, white, true))
-        branding.addView(label("OFFLINE MUSIC PLAYER", 10f, muted, true))
+        branding.addView(label("RITMO MUSIC", 19f, white, true))
+        branding.addView(label("MÚSICA PREMIUM · OFFLINE", 9f, muted, true))
         header.addView(branding, LinearLayout.LayoutParams(0, -2, 1f))
         val offline = TextView(this).apply {
-            text = "● SIN INTERNET"
+            text = "● OFFLINE"
             textSize = 10f
-            setTextColor(Color.rgb(133, 230, 184))
-            background = rounded(Color.rgb(27, 51, 47), 30)
+            setTextColor(Color.rgb(255, 110, 110))
+            background = rounded(Color.rgb(57, 28, 28), 30)
             setPadding(dp(10), dp(8), dp(10), dp(8))
         }
         header.addView(offline)
@@ -149,16 +149,16 @@ class MainActivity : ComponentActivity() {
             orientation = LinearLayout.VERTICAL
             background = GradientDrawable(
                 GradientDrawable.Orientation.TL_BR,
-                intArrayOf(Color.rgb(76, 48, 127), Color.rgb(42, 31, 73), Color.rgb(28, 25, 48))
+                intArrayOf(Color.rgb(70, 18, 18), Color.rgb(34, 24, 24), Color.rgb(24, 24, 24))
             ).apply { cornerRadius = dp(24).toFloat() }
             setPadding(dp(20), dp(18), dp(20), dp(18))
         }
-        hero.addView(label("TU MÚSICA, A TU MANERA", 11f, Color.rgb(216, 194, 255), true))
+        hero.addView(label("RITMO MUSIC PREMIUM", 11f, Color.rgb(255, 125, 125), true))
         hero.addView(label("Que no pare\nel ritmo.", 27f, white, true).apply {
             setPadding(0, dp(8), 0, dp(6))
         })
-        hero.addView(label("Escucha tus canciones favoritas, incluso sin conexión.", 13f, Color.rgb(218, 210, 235), false))
-        val addButton = actionPill("＋   Agregar canciones", purple, Color.WHITE, 15f) {
+        hero.addView(label("Tus canciones favoritas, listas para sonar sin internet.", 13f, Color.rgb(215, 215, 215), false))
+        val addButton = actionPill("＋   Añadir música", Color.rgb(255, 0, 0), Color.WHITE, 15f) {
             picker.launch(arrayOf("audio/*"))
         }
         hero.addView(addButton, LinearLayout.LayoutParams(-1, dp(50)).apply { topMargin = dp(18) })
@@ -172,7 +172,7 @@ class MainActivity : ComponentActivity() {
         }
         searchWrap.addView(label("⌕", 25f, muted, true))
         search = EditText(this).apply {
-            hint = "Buscar en tu biblioteca"
+            hint = "Buscar canciones, artistas y álbumes"
             setSingleLine(true)
             textSize = 14f
             setTextColor(white)
@@ -191,8 +191,8 @@ class MainActivity : ComponentActivity() {
             setPadding(dp(2), 0, dp(2), dp(10))
         }
         val sectionLabels = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        sectionLabels.addView(label("Tu biblioteca", 19f, white, true))
-        sectionLabels.addView(label("Tus canciones guardadas en el teléfono", 11f, muted, false).apply {
+        sectionLabels.addView(label("Tu música", 20f, white, true))
+        sectionLabels.addView(label("Biblioteca sin conexión", 11f, muted, false).apply {
             setPadding(0, dp(3), 0, 0)
         })
         section.addView(sectionLabels, LinearLayout.LayoutParams(0, -2, 1f))
@@ -239,14 +239,14 @@ class MainActivity : ComponentActivity() {
             textSize = 24f
             gravity = Gravity.CENTER
             setTextColor(Color.WHITE)
-            background = rounded(Color.rgb(91, 60, 143), 15)
+            background = rounded(Color.rgb(255, 0, 0), 15)
         }
         playerTop.addView(cover, LinearLayout.LayoutParams(dp(48), dp(48)))
         val songInfo = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(11), 0, dp(6), 0)
         }
-        songInfo.addView(label("REPRODUCIENDO", 9f, purple, true))
+        songInfo.addView(label("SONANDO AHORA", 9f, purple, true))
         nowPlaying = label("Elige una canción", 14f, white, true).apply {
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.END
@@ -406,7 +406,7 @@ class MainActivity : ComponentActivity() {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
                 background = rounded(
-                    if (controller?.currentMediaItem?.localConfiguration?.uri == track.uri) Color.rgb(54, 39, 79) else panel,
+                    if (controller?.currentMediaItem?.localConfiguration?.uri == track.uri) Color.rgb(67, 35, 35) else panel,
                     17
                 )
                 setPadding(dp(12), dp(10), dp(12), dp(10))
@@ -427,8 +427,8 @@ class MainActivity : ComponentActivity() {
                 text = "♫"
                 textSize = 20f
                 gravity = Gravity.CENTER
-                setTextColor(if (shownIndex % 2 == 0) purple else Color.rgb(111, 190, 255))
-                background = rounded(panelLight, 13)
+                setTextColor(if (shownIndex % 2 == 0) Color.rgb(255, 70, 70) else Color.rgb(225, 225, 225))
+                background = rounded(if (shownIndex % 3 == 0) Color.rgb(75, 28, 28) else panelLight, 13)
             }
             row.addView(icon, LinearLayout.LayoutParams(dp(44), dp(44)))
             val info = LinearLayout(this).apply {
@@ -439,7 +439,7 @@ class MainActivity : ComponentActivity() {
                 maxLines = 1
                 ellipsize = android.text.TextUtils.TruncateAt.END
             })
-            info.addView(label("Archivo local · Toca para reproducir", 10f, muted, false).apply {
+            info.addView(label("CANCIÓN LOCAL · Toca para escuchar", 10f, muted, false).apply {
                 setPadding(0, dp(4), 0, 0)
             })
             row.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
@@ -455,7 +455,7 @@ class MainActivity : ComponentActivity() {
             }
             empty.addView(label(if (tracks.isEmpty()) "♫" else "⌕", 34f, purple, true))
             empty.addView(label(
-                if (tracks.isEmpty()) "Tu biblioteca empieza aquí" else "No encontramos esa canción",
+                if (tracks.isEmpty()) "Tu música empieza aquí" else "No encontramos esa canción",
                 16f, white, true
             ).apply { gravity = Gravity.CENTER; setPadding(0, dp(8), 0, dp(5)) })
             empty.addView(label(
@@ -463,7 +463,7 @@ class MainActivity : ComponentActivity() {
                 12f, muted, false
             ).apply { gravity = Gravity.CENTER })
             if (tracks.isEmpty()) {
-                empty.addView(actionPill("＋  Elegir música", purple, Color.WHITE, 13f) {
+                empty.addView(actionPill("＋  Elegir música", Color.rgb(255, 0, 0), Color.WHITE, 13f) {
                     picker.launch(arrayOf("audio/*"))
                 }, LinearLayout.LayoutParams(-1, dp(46)).apply { topMargin = dp(18) })
             }
