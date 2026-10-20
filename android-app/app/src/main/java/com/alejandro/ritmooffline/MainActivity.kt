@@ -120,8 +120,8 @@ class MainActivity : ComponentActivity() {
             setPadding(0, dp(4), 0, dp(10))
         }
         val logo = TextView(this).apply {
-            text = "♫"
-            textSize = 25f
+            text = "▶"
+            textSize = 21f
             gravity = Gravity.CENTER
             setTextColor(Color.WHITE)
             background = rounded(Color.rgb(255, 0, 0), 16)
@@ -154,7 +154,7 @@ class MainActivity : ComponentActivity() {
             setPadding(dp(20), dp(18), dp(20), dp(18))
         }
         hero.addView(label("RITMO MUSIC PREMIUM", 11f, Color.rgb(255, 125, 125), true))
-        hero.addView(label("Que no pare\nel ritmo.", 27f, white, true).apply {
+        hero.addView(label("Escucha lo que\nte mueve.", 27f, white, true).apply {
             setPadding(0, dp(8), 0, dp(6))
         })
         hero.addView(label("Tus canciones favoritas, listas para sonar sin internet.", 13f, Color.rgb(215, 215, 215), false))
