@@ -73,7 +73,7 @@ class DiscoverActivity : ComponentActivity() {
             LinearLayout.LayoutParams(-1, dp(46)).apply { topMargin = dp(8) })
         root.addView(text("Explora por estilo", 17f, white, true).apply { setPadding(0, dp(16), 0, dp(8)) })
         val genreRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        listOf("Electronic", "Cumbia", "Hip hop", "House", "Lo-fi", "Rock", "Latin").forEach { genre ->
+        listOf("Pop", "Latin", "Electronic", "Hip-Hop/Rap", "Rock", "Reggaeton", "Cumbia", "House", "Techno", "Trap", "R&B/Soul", "Reggae", "Dancehall", "Disco", "Jazz", "Classical", "Metal", "Alternative", "Punk", "Folk", "Country", "Blues", "Funk", "Acoustic", "Ambient", "Soundtrack", "Lo-Fi", "Hyperpop", "Trance", "Drum & Bass", "Dubstep", "Hardstyle", "Deep House", "Tech House", "Progressive House", "Future Bass", "Tropical House", "Jungle", "Vaporwave", "World", "Experimental", "Devotional", "Podcasts", "Comedy", "Kids", "Audiobooks").forEach { genre ->
             genreRow.addView(button(genre, panel, white) {
                 searchBox.setText(genre); searchMusic(genre)
             }, LinearLayout.LayoutParams(-2, dp(38)).apply { rightMargin = dp(7) })
@@ -81,7 +81,7 @@ class DiscoverActivity : ComponentActivity() {
         root.addView(HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(genreRow) })
         root.addView(text("Tendencias para explorar", 17f, white, true).apply { setPadding(0, dp(14), 0, dp(8)) })
         val trendingRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        listOf("Trending", "Electronic dance", "Cumbia", "EDM", "Latin").forEach { term ->
+        listOf("Novedades", "Tendencias de la semana", "Trending", "Electronic dance", "Cumbia", "EDM", "Latin").forEach { term ->
             trendingRow.addView(button(term, Color.rgb(54, 29, 29), white) {
                 searchBox.setText(term); searchMusic(term)
             }, LinearLayout.LayoutParams(-2, dp(38)).apply { rightMargin = dp(7) })
@@ -159,11 +159,21 @@ class DiscoverActivity : ComponentActivity() {
         Thread {
             var connection: HttpURLConnection? = null
             try {
-                val endpoint = if (q.equals("trending", true)) {
-                    "https://api.audius.co/v1/tracks/trending?limit=25&app_name=RitmoOffline"
-                } else {
-                    "https://api.audius.co/v1/tracks/search?query=" + URLEncoder.encode(q, "UTF-8") +
-                        "&limit=25&app_name=RitmoOffline"
+                val encoded = URLEncoder.encode(q, "UTF-8")
+                val genreNames = setOf("Pop", "Latin", "Electronic", "Hip-Hop/Rap", "Rock", "Reggaeton", "Cumbia", "House", "Techno", "Trap", "R&B/Soul", "Reggae", "Dancehall", "Disco", "Jazz", "Classical", "Metal", "Alternative", "Punk", "Folk", "Country", "Blues", "Funk", "Acoustic", "Ambient", "Soundtrack", "Lo-Fi", "Hyperpop", "Trance", "Drum & Bass", "Dubstep", "Hardstyle", "Deep House", "Tech House", "Progressive House", "Future Bass", "Tropical House", "Jungle", "Vaporwave", "World", "Experimental", "Devotional", "Podcasts", "Comedy", "Kids", "Audiobooks")
+                val endpoint = when {
+                    q.equals("Novedades", true) ->
+                        "https://api.audius.co/v1/tracks/latest?limit=25&app_name=RitmoOffline"
+                    q.equals("Tendencias de la semana", true) ->
+                        "https://api.audius.co/v1/tracks/trending?time=week&limit=25&app_name=RitmoOffline"
+                    q.equals("trending", true) ->
+                        "https://api.audius.co/v1/tracks/trending?time=week&limit=25&app_name=RitmoOffline"
+                    genreNames.any { it.equals(q, true) } ->
+                        "https://api.audius.co/v1/tracks/search?query=" + encoded +
+                            "&genre=" + encoded + "&sort_method=recent&limit=25&app_name=RitmoOffline"
+                    else ->
+                        "https://api.audius.co/v1/tracks/search?query=" + encoded +
+                            "&sort_method=recent&limit=25&app_name=RitmoOffline"
                 }
                 connection = URL(endpoint).openConnection() as HttpURLConnection
                 connection.connectTimeout = 15000; connection.readTimeout = 15000
@@ -255,7 +265,7 @@ class DiscoverActivity : ComponentActivity() {
         personalizedRow.removeAllViews()
         val recent = getSharedPreferences("ritmo_discovery", MODE_PRIVATE)
             .getString("recent_searches", "").orEmpty().split("||").filter { it.isNotBlank() }.take(5)
-        val suggestions = if (recent.isEmpty()) listOf("Electronic", "Cumbia", "Lo-fi") else recent
+        val suggestions = if (recent.isEmpty()) listOf("Novedades", "Pop", "Latin", "Cumbia", "Electronic") else recent
         suggestions.forEach { term ->
             personalizedRow.addView(button(term, panel, white) {
                 searchBox.setText(term); searchMusic(term)
