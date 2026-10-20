@@ -222,7 +222,7 @@ class MainActivity : ComponentActivity() {
             orientation = LinearLayout.VERTICAL
             setPadding(0, 0, 0, dp(12))
         }
-        scroll.addView(trackList, ScrollView.LayoutParams(-1, -2))
+        scroll.addView(trackList, ViewGroup.LayoutParams(-1, -2))
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
 
         val playerCard = LinearLayout(this).apply {
