@@ -34,10 +34,12 @@ class DiscoverActivity : ComponentActivity() {
     private lateinit var nowPlaying: TextView
     private var controller: MediaController? = null
     private var albumMode = false
+    private var provider = "Audius"
+    private val jamendoPrefs by lazy { getSharedPreferences("ritmo_jamendo", MODE_PRIVATE) }
     private lateinit var genreSection: LinearLayout
     private lateinit var trendSection: LinearLayout
 
-    data class Album(val id: String, val title: String, val creator: String, val artwork: String, val trackCount: Int)
+    data class Album(val id: String, val title: String, val creator: String, val artwork: String, val trackCount: Int, val provider: String = "Audius")
 
     data class Song(
         val id: String,
@@ -45,7 +47,8 @@ class DiscoverActivity : ComponentActivity() {
         val creator: String,
         val artwork: String,
         val duration: Int,
-        val genre: String
+        val genre: String,
+        val streamUrl: String = ""
     )
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -92,6 +95,20 @@ class DiscoverActivity : ComponentActivity() {
             searchAlbums(searchBox.text.toString().ifBlank { "new releases" })
         }, LinearLayout.LayoutParams(0, dp(42), 1f).apply { leftMargin = dp(6) })
         root.addView(modeRow)
+        val sourceRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(8), 0, dp(2)) }
+        sourceRow.addView(button("Audius", Color.rgb(85, 28, 28), white) {
+            provider = "Audius"
+            status.text = "Catálogo seleccionado: Audius"
+            if (albumMode) searchAlbums(searchBox.text.toString().ifBlank { "novedades" }) else searchMusic(searchBox.text.toString().ifBlank { "trending" })
+        }, LinearLayout.LayoutParams(0, dp(40), 1f).apply { rightMargin = dp(5) })
+        sourceRow.addView(button("Jamendo", Color.rgb(42, 42, 42), white) {
+            provider = "Jamendo"
+            if (jamendoPrefs.getString("client_id", "").isNullOrBlank()) configureJamendo()
+            else if (albumMode) searchAlbums(searchBox.text.toString().ifBlank { "novedades" }) else searchMusic(searchBox.text.toString().ifBlank { "trending" })
+        }, LinearLayout.LayoutParams(0, dp(40), 1f).apply { leftMargin = dp(5); rightMargin = dp(5) })
+        sourceRow.addView(button("⚙ ID", panel, white) { configureJamendo() },
+            LinearLayout.LayoutParams(dp(72), dp(40)).apply { leftMargin = dp(5) })
+        root.addView(sourceRow)
         genreSection = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         genreSection.addView(text("Explora por estilo", 17f, white, true).apply { setPadding(0, dp(16), 0, dp(8)) })
         val genreRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
@@ -186,6 +203,42 @@ class DiscoverActivity : ComponentActivity() {
             try {
                 val encoded = URLEncoder.encode(q, "UTF-8")
                 val genreNames = setOf("Pop", "Latin", "Electronic", "Hip-Hop/Rap", "Rock", "Reggaeton", "Cumbia", "House", "Techno", "Trap", "R&B/Soul", "Reggae", "Dancehall", "Disco", "Jazz", "Classical", "Metal", "Alternative", "Punk", "Folk", "Country", "Blues", "Funk", "Acoustic", "Ambient", "Soundtrack", "Lo-Fi", "Hyperpop", "Trance", "Drum & Bass", "Dubstep", "Hardstyle", "Deep House", "Tech House", "Progressive House", "Future Bass", "Tropical House", "Jungle", "Vaporwave", "World", "Experimental", "Devotional", "Podcasts", "Comedy", "Kids", "Audiobooks")
+                if (provider == "Jamendo") {
+                    val clientId = jamendoPrefs.getString("client_id", "").orEmpty()
+                    if (clientId.isBlank()) {
+                        runOnUiThread { status.text = "Configura primero tu client_id de Jamendo con el botón ⚙ ID." }
+                        return@Thread
+                    }
+                    val params = "client_id=" + URLEncoder.encode(clientId, "UTF-8") + "&format=json&limit=25&audioformat=mp32&imagesize=300&"
+                    val endpoint = "https://api.jamendo.com/v3.0/tracks/?" + params +
+                        (if (q.equals("trending", true) || q.equals("Tendencias de la semana", true)) "order=popularity_week_desc"
+                        else if (q.equals("Novedades", true)) "order=releasedate_desc"
+                        else "search=" + URLEncoder.encode(q, "UTF-8") + "&order=releasedate_desc")
+                    connection = URL(endpoint).openConnection() as HttpURLConnection
+                    connection.connectTimeout = 15000; connection.readTimeout = 15000
+                    connection.setRequestProperty("User-Agent", "RitmoOffline/1.0 (Android)")
+                    val jamJson = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+                    val jamData = jamJson.optJSONArray("results")
+                    val jamSongs = mutableListOf<Song>()
+                    if (jamData != null) for (i in 0 until jamData.length()) {
+                        val item = jamData.optJSONObject(i) ?: continue
+                        val id = item.optString("id", "")
+                        val audio = item.optString("audio", "")
+                        if (id.isBlank() || !audio.startsWith("https://")) continue
+                        jamSongs.add(Song(id, item.optString("name", "Audio sin título"),
+                            item.optString("artist_name", "Artista independiente"),
+                            item.optString("album_image", item.optString("image", "")),
+                            item.optInt("duration", 0), item.optString("musicinfo", ""), audio))
+                    }
+                    runOnUiThread {
+                        if (jamSongs.isEmpty()) status.text = "Jamendo no devolvió pistas. Comprueba el client_id o prueba otro término."
+                        else {
+                            status.text = jamSongs.size.toString() + " pistas de Jamendo · streaming"
+                            jamSongs.forEach { addSongCard(it) }
+                        }
+                    }
+                    return@Thread
+                }
                 val endpoint = when {
                     q.equals("Novedades", true) ->
                         "https://api.audius.co/v1/tracks/latest?limit=25&app_name=RitmoOffline"
@@ -242,6 +295,39 @@ class DiscoverActivity : ComponentActivity() {
         Thread {
             var connection: HttpURLConnection? = null
             try {
+                if (provider == "Jamendo") {
+                    val clientId = jamendoPrefs.getString("client_id", "").orEmpty()
+                    if (clientId.isBlank()) {
+                        runOnUiThread { status.text = "Configura primero tu client_id de Jamendo con el botón ⚙ ID." }
+                        return@Thread
+                    }
+                    val endpoint = "https://api.jamendo.com/v3.0/albums/?client_id=" + URLEncoder.encode(clientId, "UTF-8") +
+                        "&format=json&limit=25&imagesize=300&" +
+                        (if (q.equals("new releases", true) || q.equals("novedades", true)) "order=releasedate_desc"
+                        else "namesearch=" + URLEncoder.encode(q, "UTF-8") + "&order=popularity_week_desc")
+                    connection = URL(endpoint).openConnection() as HttpURLConnection
+                    connection.connectTimeout = 15000; connection.readTimeout = 15000
+                    connection.setRequestProperty("User-Agent", "RitmoOffline/1.0 (Android)")
+                    val jamJson = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+                    val jamData = jamJson.optJSONArray("results")
+                    val jamAlbums = mutableListOf<Album>()
+                    if (jamData != null) for (i in 0 until jamData.length()) {
+                        val item = jamData.optJSONObject(i) ?: continue
+                        val id = item.optString("id", "")
+                        if (id.isBlank()) continue
+                        jamAlbums.add(Album(id, item.optString("name", "Álbum sin título"),
+                            item.optString("artist_name", "Artista independiente"), item.optString("image", ""),
+                            0, "Jamendo"))
+                    }
+                    runOnUiThread {
+                        if (jamAlbums.isEmpty()) status.text = "Jamendo no devolvió álbumes. Prueba otro término."
+                        else {
+                            status.text = jamAlbums.size.toString() + " álbumes de Jamendo · pulsa para reproducir"
+                            jamAlbums.forEach { addAlbumCard(it) }
+                        }
+                    }
+                    return@Thread
+                }
                 val endpoint = if (q.equals("new releases", true) || q.equals("novedades", true))
                     "https://api.audius.co/v1/playlists/new-releases?limit=25&app_name=RitmoOffline"
                 else
@@ -264,7 +350,7 @@ class DiscoverActivity : ComponentActivity() {
                     val contents = item.optJSONArray("playlist_contents")
                     found.add(Album(id, item.optString("playlist_name", item.optString("title", "Álbum sin título")),
                         user?.optString("name", "Artista independiente") ?: "Artista independiente",
-                        artwork, contents?.length() ?: item.optInt("track_count", 0)))
+                        artwork, contents?.length() ?: item.optInt("track_count", 0), "Audius"))
                 }
                 runOnUiThread {
                     if (found.isEmpty()) status.text = "No encontramos álbumes para \"" + q + "\". Prueba otro artista o término."
@@ -303,21 +389,31 @@ class DiscoverActivity : ComponentActivity() {
         Thread {
             var connection: HttpURLConnection? = null
             try {
-                connection = URL("https://api.audius.co/v1/playlists/" + Uri.encode(album.id) + "/tracks?app_name=RitmoOffline").openConnection() as HttpURLConnection
+                val endpoint = if (album.provider == "Jamendo") {
+                    val clientId = jamendoPrefs.getString("client_id", "").orEmpty()
+                    "https://api.jamendo.com/v3.0/tracks/?client_id=" + URLEncoder.encode(clientId, "UTF-8") +
+                        "&format=json&limit=100&audioformat=mp32&imagesize=300&album_id=" + Uri.encode(album.id) + "&order=id_asc"
+                } else "https://api.audius.co/v1/playlists/" + Uri.encode(album.id) + "/tracks?app_name=RitmoOffline"
+                connection = URL(endpoint).openConnection() as HttpURLConnection
                 connection.connectTimeout = 15000; connection.readTimeout = 20000
                 val json = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
-                val data = json.optJSONArray("data")
+                val data = json.optJSONArray(if (album.provider == "Jamendo") "results" else "data")
                 val items = mutableListOf<MediaItem>()
                 if (data != null) for (i in 0 until data.length()) {
                     val track = data.optJSONObject(i) ?: continue
                     val id = track.optString("id", "")
                     if (id.isBlank()) continue
-                    val title = track.optString("title", "Audio sin título")
-                    val artist = track.optJSONObject("user")?.optString("name", "Artista independiente") ?: "Artista independiente"
-                    val artwork = track.optJSONObject("artwork")?.optString("150x150", "").orEmpty()
+                    val title = track.optString(if (album.provider == "Jamendo") "name" else "title", "Audio sin título")
+                    val artist = if (album.provider == "Jamendo") track.optString("artist_name", "Artista independiente")
+                        else track.optJSONObject("user")?.optString("name", "Artista independiente") ?: "Artista independiente"
+                    val artwork = if (album.provider == "Jamendo") track.optString("album_image", track.optString("image", ""))
+                        else track.optJSONObject("artwork")?.optString("150x150", "").orEmpty()
                     val metadata = MediaMetadata.Builder().setTitle(title).setArtist(artist)
                         .apply { if (artwork.startsWith("https://")) setArtworkUri(Uri.parse(artwork)) }.build()
-                    val uri = Uri.parse("https://api.audius.co/v1/tracks/" + Uri.encode(id) + "/stream?app_name=RitmoOffline")
+                    val stream = if (album.provider == "Jamendo") track.optString("audio", "")
+                        else "https://api.audius.co/v1/tracks/" + Uri.encode(id) + "/stream?app_name=RitmoOffline"
+                    if (!stream.startsWith("https://")) continue
+                    val uri = Uri.parse(stream)
                     items.add(MediaItem.Builder().setUri(uri).setMediaMetadata(metadata).build())
                 }
                 runOnUiThread {
@@ -365,7 +461,7 @@ class DiscoverActivity : ComponentActivity() {
             status.text = "El reproductor se está preparando. Toca reproducir otra vez."
             return
         }
-        val streamUri = Uri.parse("https://api.audius.co/v1/tracks/" + Uri.encode(song.id) + "/stream?app_name=RitmoOffline")
+        val streamUri = Uri.parse(song.streamUrl.ifBlank { "https://api.audius.co/v1/tracks/" + Uri.encode(song.id) + "/stream?app_name=RitmoOffline" })
         val metadata = MediaMetadata.Builder()
             .setTitle(song.title)
             .setArtist(song.creator)
@@ -377,6 +473,39 @@ class DiscoverActivity : ComponentActivity() {
         c.play()
         nowPlaying.text = song.title
         status.text = "Reproduciendo por internet · los datos móviles pueden consumir tu plan."
+    }
+
+    private fun configureJamendo() {
+        val input = EditText(this).apply {
+            hint = "Pega aquí tu client_id de Jamendo"
+            setSingleLine(true)
+            setText(jamendoPrefs.getString("client_id", "").orEmpty())
+            setTextColor(white)
+            setHintTextColor(muted)
+            background = rounded(panel, 12)
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+        }
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(8), dp(8), dp(8), 0)
+            addView(input, LinearLayout.LayoutParams(-1, dp(52)))
+            addView(text("Consigue el ID gratis en developer.jamendo.com. No es una contraseña; se usa para consultar su catálogo.", 12f, muted, false).apply {
+                setPadding(0, dp(10), 0, 0)
+            })
+        }
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Configurar catálogo Jamendo")
+            .setView(container)
+            .setNegativeButton("Cancelar", null)
+            .setPositiveButton("Guardar") { _, _ ->
+                val value = input.text.toString().trim()
+                jamendoPrefs.edit().putString("client_id", value).apply()
+                provider = "Jamendo"
+                if (value.isBlank()) status.text = "Jamendo aún no está configurado."
+                else if (albumMode) searchAlbums(searchBox.text.toString().ifBlank { "novedades" })
+                else searchMusic(searchBox.text.toString().ifBlank { "Novedades" })
+            }
+            .show()
     }
 
     private fun rememberSearch(term: String) {
