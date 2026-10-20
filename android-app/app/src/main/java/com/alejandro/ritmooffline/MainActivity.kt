@@ -4,12 +4,16 @@ import android.Manifest
 import android.content.ComponentName
 import android.content.Context
 import android.content.pm.PackageManager
+import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.OpenableColumns
-import android.graphics.Color
 import android.view.Gravity
+import android.view.View
+import android.view.ViewGroup
 import android.widget.*
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
@@ -28,9 +32,11 @@ class MainActivity : ComponentActivity() {
     private lateinit var status: TextView
     private lateinit var nowPlaying: TextView
     private lateinit var search: EditText
-    private lateinit var playButton: Button
-    private lateinit var shuffleButton: Button
+    private lateinit var playButton: TextView
+    private lateinit var shuffleButton: TextView
+    private lateinit var libraryCount: TextView
     private var shuffle = false
+
     data class Track(val uri: Uri, val title: String)
 
     private val picker = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
@@ -41,16 +47,27 @@ class MainActivity : ComponentActivity() {
         }
         saveTracks()
         renderTracks()
-        status.text = "${tracks.size} canciones guardadas en la biblioteca"
+        status.text = "Biblioteca actualizada · ${tracks.size} canciones"
         if (controller?.mediaItemCount == 0) loadQueue()
     }
 
     private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
+    private val bg = Color.rgb(13, 12, 23)
+    private val panel = Color.rgb(25, 23, 41)
+    private val panelLight = Color.rgb(34, 30, 54)
+    private val purple = Color.rgb(167, 115, 255)
+    private val white = Color.rgb(248, 246, 255)
+    private val muted = Color.rgb(169, 163, 190)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.statusBarColor = Color.rgb(18, 16, 30)
-        window.navigationBarColor = Color.rgb(18, 16, 30)
+        window.statusBarColor = bg
+        window.navigationBarColor = bg
+        if (Build.VERSION.SDK_INT >= 29) {
+            window.isNavigationBarContrastEnforced = false
+            window.isStatusBarContrastEnforced = false
+        }
         buildUi()
         restoreTracks()
         renderTracks()
@@ -68,15 +85,18 @@ class MainActivity : ComponentActivity() {
                 controller = future.get()
                 controller?.addListener(object : Player.Listener {
                     override fun onIsPlayingChanged(isPlaying: Boolean) {
-                        playButton.text = if (isPlaying) "❚❚ Pausar" else "▶ Reproducir"
+                        updatePlayButton()
                     }
                     override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                        nowPlaying.text = mediaItem?.mediaMetadata?.title ?: "Nada reproduciéndose"
+                        nowPlaying.text = mediaItem?.mediaMetadata?.title ?: "Elige una canción"
+                        renderTracks()
                     }
                 })
                 if (tracks.isNotEmpty() && controller?.mediaItemCount == 0) loadQueue()
                 updateNowPlaying()
-            } catch (_: Exception) { status.text = "No se pudo iniciar el reproductor" }
+            } catch (_: Exception) {
+                status.text = "No se pudo iniciar el reproductor"
+            }
         }, ContextCompat.getMainExecutor(this))
     }
 
@@ -89,60 +109,172 @@ class MainActivity : ComponentActivity() {
     private fun buildUi() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(18, 22, 18, 12)
-            setBackgroundColor(Color.rgb(18, 16, 30))
+            setPadding(dp(18), dp(12), dp(18), dp(8))
+            setBackgroundColor(bg)
+            clipToPadding = false
         }
-        root.addView(TextView(this).apply {
-            text = "♫  RITMO OFFLINE"
-            textSize = 25f
-            setTextColor(Color.WHITE)
+
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            typeface = android.graphics.Typeface.DEFAULT_BOLD
-        }, LinearLayout.LayoutParams(-1, 50))
-        root.addView(TextView(this).apply {
-            text = "Tu música. Sin internet."
-            textSize = 14f
-            setTextColor(Color.rgb(190, 180, 220))
-            setPadding(0, 0, 0, 12)
-        })
-        root.addView(Button(this).apply {
-            text = "＋ Agregar canciones"
-            setOnClickListener { picker.launch(arrayOf("audio/*")) }
-        }, LinearLayout.LayoutParams(-1, 50))
-        search = EditText(this).apply {
-            hint = "Buscar canción…"
-            setSingleLine()
-            setTextColor(Color.WHITE)
-            setHintTextColor(Color.LTGRAY)
-            setBackgroundColor(Color.rgb(38, 34, 54))
-            setPadding(14, 0, 14, 0)
+            setPadding(0, dp(4), 0, dp(10))
         }
-        val searchLp = LinearLayout.LayoutParams(-1, 48).apply { topMargin = 9; bottomMargin = 7 }
-        root.addView(search, searchLp)
+        val logo = TextView(this).apply {
+            text = "♫"
+            textSize = 25f
+            gravity = Gravity.CENTER
+            setTextColor(Color.WHITE)
+            background = rounded(purple, 16)
+            typeface = Typeface.DEFAULT_BOLD
+        }
+        header.addView(logo, LinearLayout.LayoutParams(dp(48), dp(48)))
+        val branding = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), 0, 0, 0)
+        }
+        branding.addView(label("RITMO", 20f, white, true))
+        branding.addView(label("OFFLINE MUSIC PLAYER", 10f, muted, true))
+        header.addView(branding, LinearLayout.LayoutParams(0, -2, 1f))
+        val offline = TextView(this).apply {
+            text = "● SIN INTERNET"
+            textSize = 10f
+            setTextColor(Color.rgb(133, 230, 184))
+            background = rounded(Color.rgb(27, 51, 47), 30)
+            setPadding(dp(10), dp(8), dp(10), dp(8))
+        }
+        header.addView(offline)
+        root.addView(header)
+
+        val hero = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = GradientDrawable(
+                GradientDrawable.Orientation.TL_BR,
+                intArrayOf(Color.rgb(76, 48, 127), Color.rgb(42, 31, 73), Color.rgb(28, 25, 48))
+            ).apply { cornerRadius = dp(24).toFloat() }
+            setPadding(dp(20), dp(18), dp(20), dp(18))
+        }
+        hero.addView(label("TU MÚSICA, A TU MANERA", 11f, Color.rgb(216, 194, 255), true))
+        hero.addView(label("Que no pare\nel ritmo.", 27f, white, true).apply {
+            setPadding(0, dp(8), 0, dp(6))
+        })
+        hero.addView(label("Escucha tus canciones favoritas, incluso sin conexión.", 13f, Color.rgb(218, 210, 235), false))
+        val addButton = actionPill("＋   Agregar canciones", purple, Color.WHITE, 15f) {
+            picker.launch(arrayOf("audio/*"))
+        }
+        hero.addView(addButton, LinearLayout.LayoutParams(-1, dp(50)).apply { topMargin = dp(18) })
+        root.addView(hero, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(16) })
+
+        val searchWrap = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = rounded(panel, 16)
+            setPadding(dp(14), 0, dp(14), 0)
+        }
+        searchWrap.addView(label("⌕", 25f, muted, true))
+        search = EditText(this).apply {
+            hint = "Buscar en tu biblioteca"
+            setSingleLine(true)
+            textSize = 14f
+            setTextColor(white)
+            setHintTextColor(muted)
+            background = null
+            setPadding(dp(10), 0, 0, 0)
+            imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH
+        }
+        searchWrap.addView(search, LinearLayout.LayoutParams(0, dp(50), 1f))
+        root.addView(searchWrap, LinearLayout.LayoutParams(-1, dp(52)).apply { bottomMargin = dp(16) })
         search.addTextChangedListener(SimpleTextWatcher { renderTracks() })
-        status = TextView(this).apply {
-            text = "Agrega canciones guardadas en tu teléfono"
-            setTextColor(Color.rgb(190, 180, 220))
-            textSize = 12f
-            setPadding(2, 5, 2, 8)
+
+        val section = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(2), 0, dp(2), dp(10))
+        }
+        val sectionLabels = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        sectionLabels.addView(label("Tu biblioteca", 19f, white, true))
+        sectionLabels.addView(label("Tus canciones guardadas en el teléfono", 11f, muted, false).apply {
+            setPadding(0, dp(3), 0, 0)
+        })
+        section.addView(sectionLabels, LinearLayout.LayoutParams(0, -2, 1f))
+        libraryCount = TextView(this).apply {
+            text = "0 pistas"
+            textSize = 11f
+            setTextColor(Color.rgb(218, 199, 255))
+            background = rounded(panelLight, 30)
+            setPadding(dp(10), dp(7), dp(10), dp(7))
+        }
+        section.addView(libraryCount)
+        root.addView(section)
+
+        status = label("Agrega música para empezar a escuchar.", 12f, muted, false).apply {
+            setPadding(dp(2), 0, dp(2), dp(8))
         }
         root.addView(status)
-        val scroll = ScrollView(this)
-        trackList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        scroll.addView(trackList)
-        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
-        nowPlaying = TextView(this).apply {
-            text = "Nada reproduciéndose"
-            setTextColor(Color.WHITE)
-            textSize = 16f
-            gravity = Gravity.CENTER
-            setPadding(4, 12, 4, 8)
-            maxLines = 2
+
+        val scroll = ScrollView(this).apply {
+            isFillViewport = true
+            isVerticalScrollBarEnabled = false
+            overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
+            clipToPadding = false
+            setPadding(0, 0, 0, dp(8))
         }
-        root.addView(nowPlaying)
-        val controls = LinearLayout(this).apply { gravity = Gravity.CENTER }
-        controls.addView(makeButton("⏮") { controller?.seekToPreviousMediaItem() })
-        playButton = makeButton("▶ Reproducir") {
+        trackList = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, 0, 0, dp(12))
+        }
+        scroll.addView(trackList, ViewGroup.LayoutParams(-1, -2))
+        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+
+        val playerCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = rounded(panel, 22)
+            setPadding(dp(14), dp(12), dp(14), dp(10))
+        }
+        val playerTop = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val cover = TextView(this).apply {
+            text = "♫"
+            textSize = 24f
+            gravity = Gravity.CENTER
+            setTextColor(Color.WHITE)
+            background = rounded(Color.rgb(91, 60, 143), 15)
+        }
+        playerTop.addView(cover, LinearLayout.LayoutParams(dp(48), dp(48)))
+        val songInfo = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(11), 0, dp(6), 0)
+        }
+        songInfo.addView(label("REPRODUCIENDO", 9f, purple, true))
+        nowPlaying = label("Elige una canción", 14f, white, true).apply {
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            setPadding(0, dp(3), 0, 0)
+        }
+        songInfo.addView(nowPlaying)
+        playerTop.addView(songInfo, LinearLayout.LayoutParams(0, -2, 1f))
+        playerTop.addView(actionPill("＋ Añadir", panelLight, white, 11f) {
+            picker.launch(arrayOf("audio/*"))
+        }.apply { setPadding(dp(11), dp(10), dp(11), dp(10)) })
+        playerCard.addView(playerTop)
+
+        val controls = LinearLayout(this).apply {
+            gravity = Gravity.CENTER
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, dp(8), 0, 0)
+        }
+        val shuffleControl = controlButton("⤨", false) {
+            shuffle = !shuffle
+            controller?.shuffleModeEnabled = shuffle
+            shuffleButton.isSelected = shuffle
+            shuffleButton.setTextColor(if (shuffle) purple else muted)
+            status.text = if (shuffle) "Modo aleatorio activado" else "Modo aleatorio desactivado"
+        }
+        shuffleButton = shuffleControl
+        controls.addView(shuffleControl, LinearLayout.LayoutParams(0, dp(44), 1f))
+        controls.addView(controlButton("⏮", false) { controller?.seekToPreviousMediaItem() }, LinearLayout.LayoutParams(0, dp(44), 1f))
+        playButton = actionPill("▶", purple, Color.WHITE, 21f) {
             val c = controller
             if (c != null) {
                 if (c.isPlaying) c.pause() else {
@@ -150,40 +282,71 @@ class MainActivity : ComponentActivity() {
                     c.play()
                 }
             }
-        }
-        controls.addView(playButton)
-        controls.addView(makeButton("⏭") { controller?.seekToNextMediaItem() })
-        root.addView(controls)
-        val extras = LinearLayout(this).apply { gravity = Gravity.CENTER }
-        shuffleButton = makeButton("🔀 Aleatorio: no") {
-            shuffle = !shuffle
-            controller?.shuffleModeEnabled = shuffle
-            shuffleButton.text = if (shuffle) "🔀 Aleatorio: sí" else "🔀 Aleatorio: no"
-        }
-        extras.addView(shuffleButton)
-        extras.addView(makeButton("↻ Repetir") {
-            val c = controller
-            if (c != null) {
-                c.repeatMode = when (c.repeatMode) {
-                    Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
-                    Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
-                    else -> Player.REPEAT_MODE_OFF
-                }
-                status.text = when (c.repeatMode) {
-                    Player.REPEAT_MODE_ALL -> "Repitiendo toda la lista"
-                    Player.REPEAT_MODE_ONE -> "Repitiendo esta canción"
-                    else -> "Repetición desactivada"
-                }
-            }
+        }.apply { gravity = Gravity.CENTER }
+        controls.addView(playButton, LinearLayout.LayoutParams(dp(66), dp(48)).apply {
+            leftMargin = dp(8); rightMargin = dp(8)
         })
-        root.addView(extras)
+        controls.addView(controlButton("⏭", false) { controller?.seekToNextMediaItem() }, LinearLayout.LayoutParams(0, dp(44), 1f))
+        controls.addView(controlButton("↻", false) {
+            val c = controller ?: return@controlButton
+            c.repeatMode = when (c.repeatMode) {
+                Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
+                Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
+                else -> Player.REPEAT_MODE_OFF
+            }
+            status.text = when (c.repeatMode) {
+                Player.REPEAT_MODE_ALL -> "Repetir toda la lista activado"
+                Player.REPEAT_MODE_ONE -> "Repetir una canción activado"
+                else -> "Repetición desactivada"
+            }
+        }, LinearLayout.LayoutParams(0, dp(44), 1f))
+        playerCard.addView(controls)
+        root.addView(playerCard, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
         setContentView(root)
     }
 
-    private fun makeButton(label: String, action: () -> Unit) = Button(this).apply {
-        text = label
-        setOnClickListener { action() }
-    }
+    private fun label(value: String, size: Float, color: Int, bold: Boolean): TextView =
+        TextView(this).apply {
+            text = value
+            textSize = size
+            setTextColor(color)
+            if (bold) typeface = Typeface.DEFAULT_BOLD
+            includeFontPadding = true
+        }
+
+    private fun rounded(color: Int, radiusDp: Int): GradientDrawable =
+        GradientDrawable().apply {
+            setColor(color)
+            cornerRadius = dp(radiusDp).toFloat()
+        }
+
+    private fun actionPill(textValue: String, color: Int, textColor: Int, size: Float, action: () -> Unit): TextView =
+        TextView(this).apply {
+            text = textValue
+            textSize = size
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            setTextColor(textColor)
+            background = rounded(color, 16)
+            isClickable = true
+            isFocusable = true
+            setPadding(dp(14), dp(10), dp(14), dp(10))
+            setOnClickListener { action() }
+        }
+
+    private fun controlButton(symbol: String, active: Boolean, action: () -> Unit): TextView =
+        TextView(this).apply {
+            text = symbol
+            textSize = 22f
+            gravity = Gravity.CENTER
+            setTextColor(if (active) purple else muted)
+            background = rounded(Color.TRANSPARENT, 14)
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { action() }
+        }
+
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     private fun displayName(uri: Uri): String {
         var name = uri.lastPathSegment ?: "Audio"
@@ -210,7 +373,7 @@ class MainActivity : ComponentActivity() {
     private fun loadQueue() {
         val c = controller ?: return
         if (tracks.isEmpty()) {
-            status.text = "Pulsa Agregar canciones para comenzar"
+            status.text = "Pulsa «Agregar canciones» para comenzar"
             return
         }
         val items = tracks.map { track ->
@@ -223,9 +386,13 @@ class MainActivity : ComponentActivity() {
         updateNowPlaying()
     }
 
+    private fun updatePlayButton() {
+        if (::playButton.isInitialized) playButton.text = if (controller?.isPlaying == true) "Ⅱ" else "▶"
+    }
+
     private fun updateNowPlaying() {
         nowPlaying.text = controller?.currentMediaItem?.mediaMetadata?.title ?: "Elige una canción"
-        playButton.text = if (controller?.isPlaying == true) "❚❚ Pausar" else "▶ Reproducir"
+        updatePlayButton()
     }
 
     private fun renderTracks() {
@@ -233,13 +400,18 @@ class MainActivity : ComponentActivity() {
         trackList.removeAllViews()
         val query = if (::search.isInitialized) search.text.toString().trim().lowercase() else ""
         val shown = tracks.filter { it.title.lowercase().contains(query) }
-        shown.forEach { track ->
-            val row = TextView(this).apply {
-                text = "♫   ${track.title}"
-                textSize = 15f
-                setTextColor(Color.WHITE)
-                setPadding(14, 16, 10, 16)
-                setBackgroundColor(Color.rgb(30, 27, 44))
+        if (::libraryCount.isInitialized) libraryCount.text = "${shown.size} pistas"
+        shown.forEachIndexed { shownIndex, track ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                background = rounded(
+                    if (controller?.currentMediaItem?.localConfiguration?.uri == track.uri) Color.rgb(54, 39, 79) else panel,
+                    17
+                )
+                setPadding(dp(12), dp(10), dp(12), dp(10))
+                isClickable = true
+                isFocusable = true
                 setOnClickListener {
                     val c = controller ?: return@setOnClickListener
                     val index = tracks.indexOf(track)
@@ -247,16 +419,55 @@ class MainActivity : ComponentActivity() {
                     c.seekTo(index.coerceAtLeast(0), 0L)
                     c.play()
                     nowPlaying.text = track.title
+                    status.text = "Reproduciendo desde tu biblioteca"
+                    renderTracks()
                 }
             }
-            trackList.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = 5 })
+            val icon = TextView(this).apply {
+                text = "♫"
+                textSize = 20f
+                gravity = Gravity.CENTER
+                setTextColor(if (shownIndex % 2 == 0) purple else Color.rgb(111, 190, 255))
+                background = rounded(panelLight, 13)
+            }
+            row.addView(icon, LinearLayout.LayoutParams(dp(44), dp(44)))
+            val info = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(12), 0, dp(6), 0)
+            }
+            info.addView(label(track.title, 14f, white, true).apply {
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+            })
+            info.addView(label("Archivo local · Toca para reproducir", 10f, muted, false).apply {
+                setPadding(0, dp(4), 0, 0)
+            })
+            row.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
+            row.addView(label("▶", 13f, purple, true).apply { setPadding(dp(6), 0, 0, 0) })
+            trackList.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
         }
         if (shown.isEmpty()) {
-            trackList.addView(TextView(this).apply {
-                text = if (tracks.isEmpty()) "Tu biblioteca está vacía. Agrega MP3, M4A, OGG o FLAC." else "No se encontraron canciones."
-                setTextColor(Color.LTGRAY)
-                setPadding(8, 20, 8, 20)
-            })
+            val empty = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                background = rounded(panel, 20)
+                setPadding(dp(22), dp(28), dp(22), dp(28))
+            }
+            empty.addView(label(if (tracks.isEmpty()) "♫" else "⌕", 34f, purple, true))
+            empty.addView(label(
+                if (tracks.isEmpty()) "Tu biblioteca empieza aquí" else "No encontramos esa canción",
+                16f, white, true
+            ).apply { gravity = Gravity.CENTER; setPadding(0, dp(8), 0, dp(5)) })
+            empty.addView(label(
+                if (tracks.isEmpty()) "Agrega los archivos de audio de tu teléfono y estarán aquí." else "Prueba con otro nombre o palabra.",
+                12f, muted, false
+            ).apply { gravity = Gravity.CENTER })
+            if (tracks.isEmpty()) {
+                empty.addView(actionPill("＋  Elegir música", purple, Color.WHITE, 13f) {
+                    picker.launch(arrayOf("audio/*"))
+                }, LinearLayout.LayoutParams(-1, dp(46)).apply { topMargin = dp(18) })
+            }
+            trackList.addView(empty, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(4) })
         }
     }
 }
