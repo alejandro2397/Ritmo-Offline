@@ -163,6 +163,9 @@ class MainActivity : ComponentActivity() {
         }
         hero.addView(addButton, LinearLayout.LayoutParams(-1, dp(50)).apply { topMargin = dp(18) })
         root.addView(hero, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(16) })
+        root.addView(actionPill("♫   Descubrir música gratis", panelLight, white, 14f) {
+            startActivity(android.content.Intent(this, DiscoverActivity::class.java))
+        }, LinearLayout.LayoutParams(-1, dp(48)).apply { bottomMargin = dp(14) })
 
         val searchWrap = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -303,7 +306,7 @@ class MainActivity : ComponentActivity() {
             clipToPadding = false
             setFillViewport(false)
         }
-        pageScroll.addView(root, ScrollView.LayoutParams(-1, -2))
+        pageScroll.addView(root, ViewGroup.LayoutParams(-1, -2))
         setContentView(pageScroll)
     }
 
