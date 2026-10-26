@@ -20,6 +20,8 @@ import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
+import java.security.MessageDigest
+import java.util.UUID
 
 class DiscoverActivity : ComponentActivity() {
     private val bg = Color.rgb(15, 15, 15)
@@ -37,6 +39,7 @@ class DiscoverActivity : ComponentActivity() {
     private var provider = "Audius"
     private val jamendoPrefs by lazy { getSharedPreferences("ritmo_jamendo", MODE_PRIVATE) }
     private val soundCloudPrefs by lazy { getSharedPreferences("ritmo_soundcloud", MODE_PRIVATE) }
+    private val navidromePrefs by lazy { getSharedPreferences("ritmo_navidrome", MODE_PRIVATE) }
     private lateinit var genreSection: LinearLayout
     private lateinit var trendSection: LinearLayout
 
@@ -124,13 +127,23 @@ class DiscoverActivity : ComponentActivity() {
                 searchMusic(searchBox.text.toString().ifBlank { "trending" })
             } else searchMusic(searchBox.text.toString().ifBlank { "trending" })
         }, LinearLayout.LayoutParams(0, dp(38), 1f).apply { rightMargin = dp(5) })
-        extraSourceRow.addView(button("⚙ IDs", panel, white) {
+        extraSourceRow.addView(button("Navidrome", Color.rgb(75, 45, 110), white) {
+            provider = "Navidrome"
+            if (!isNavidromeConfigured()) configureNavidrome()
+            else {
+                albumMode = false
+                genreSection.visibility = android.view.View.VISIBLE
+                trendSection.visibility = android.view.View.VISIBLE
+                searchMusic(searchBox.text.toString().ifBlank { "music" })
+            }
+        }, LinearLayout.LayoutParams(0, dp(38), 1f).apply { leftMargin = dp(5); rightMargin = dp(5) })
+        extraSourceRow.addView(button("⚙ Fuentes", panel, white) {
             android.app.AlertDialog.Builder(this)
                 .setTitle("Configurar catálogos")
-                .setItems(arrayOf("Configurar Jamendo", "Configurar SoundCloud")) { _, which ->
-                    if (which == 0) configureJamendo() else configureSoundCloud()
+                .setItems(arrayOf("Configurar Jamendo", "Configurar SoundCloud", "Configurar Navidrome")) { _, which ->
+                    when (which) { 0 -> configureJamendo(); 1 -> configureSoundCloud(); else -> configureNavidrome() }
                 }.show()
-        }, LinearLayout.LayoutParams(dp(100), dp(38)).apply { leftMargin = dp(5) })
+        }, LinearLayout.LayoutParams(dp(105), dp(38)).apply { leftMargin = dp(5) })
         root.addView(extraSourceRow)
         genreSection = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         genreSection.addView(text("Explora por estilo", 17f, white, true).apply { setPadding(0, dp(16), 0, dp(8)) })
@@ -226,6 +239,51 @@ class DiscoverActivity : ComponentActivity() {
             try {
                 val encoded = URLEncoder.encode(q, "UTF-8")
                 val genreNames = setOf("Pop", "Latin", "Electronic", "Hip-Hop/Rap", "Rock", "Reggaeton", "Cumbia", "House", "Techno", "Trap", "R&B/Soul", "Reggae", "Dancehall", "Disco", "Jazz", "Classical", "Metal", "Alternative", "Punk", "Folk", "Country", "Blues", "Funk", "Acoustic", "Ambient", "Soundtrack", "Lo-Fi", "Hyperpop", "Trance", "Drum & Bass", "Dubstep", "Hardstyle", "Deep House", "Tech House", "Progressive House", "Future Bass", "Tropical House", "Jungle", "Vaporwave", "World", "Experimental", "Devotional", "Podcasts", "Comedy", "Kids", "Audiobooks")
+                if (provider == "Navidrome") {
+                    val baseUrl = navidromePrefs.getString("server_url", "").orEmpty().trim().trimEnd('/')
+                    val username = navidromePrefs.getString("username", "").orEmpty().trim()
+                    val password = navidromePrefs.getString("password", "").orEmpty()
+                    if (baseUrl.isBlank() || username.isBlank() || password.isBlank()) {
+                        runOnUiThread { status.text = "Configura la dirección del servidor Navidrome, usuario y contraseña en ⚙ Fuentes." }
+                        return@Thread
+                    }
+                    val salt = UUID.randomUUID().toString().replace("-", "").take(12)
+                    val token = md5(password + salt)
+                    val endpoint = baseUrl + "/rest/search3.view?u=" + URLEncoder.encode(username, "UTF-8") +
+                        "&t=" + token + "&s=" + salt + "&v=1.16.1&c=RitmoOffline&f=json&query=" +
+                        URLEncoder.encode(q, "UTF-8") + "&songCount=30&albumCount=0&artistCount=0"
+                    connection = URL(endpoint).openConnection() as HttpURLConnection
+                    connection.connectTimeout = 15000; connection.readTimeout = 20000
+                    connection.setRequestProperty("User-Agent", "RitmoOffline/1.0 (Android)")
+                    val response = connection.inputStream.bufferedReader().use { it.readText() }
+                    val rootJson = JSONObject(response).optJSONObject("subsonic-response")
+                    if (rootJson?.optString("status") != "ok") throw IllegalStateException("Navidrome API error")
+                    val data = rootJson.optJSONObject("searchResult3")?.optJSONArray("song")
+                    val tracks = mutableListOf<Song>()
+                    if (data != null) for (i in 0 until data.length()) {
+                        val item = data.optJSONObject(i) ?: continue
+                        val id = item.optString("id", "")
+                        if (id.isBlank()) continue
+                        val streamUrl = baseUrl + "/rest/stream.view?id=" + URLEncoder.encode(id, "UTF-8") +
+                            "&u=" + URLEncoder.encode(username, "UTF-8") + "&t=" + token + "&s=" + salt +
+                            "&v=1.16.1&c=RitmoOffline"
+                        val coverId = item.optString("coverArt", "")
+                        val artwork = if (coverId.isNotBlank()) baseUrl + "/rest/getCoverArt.view?id=" +
+                            URLEncoder.encode(coverId, "UTF-8") + "&u=" + URLEncoder.encode(username, "UTF-8") +
+                            "&t=" + token + "&s=" + salt + "&v=1.16.1&c=RitmoOffline" else ""
+                        tracks.add(Song(id, item.optString("title", "Audio sin título"),
+                            item.optString("artist", "Artista"), artwork, item.optInt("duration", 0),
+                            "Navidrome · biblioteca personal", streamUrl))
+                    }
+                    runOnUiThread {
+                        if (tracks.isEmpty()) status.text = "No se encontraron canciones en tu servidor Navidrome. Comprueba que tenga música y que la dirección sea correcta."
+                        else {
+                            status.text = tracks.size.toString() + " canciones de tu biblioteca Navidrome · reproduce en segundo plano"
+                            tracks.forEach { addSongCard(it) }
+                        }
+                    }
+                    return@Thread
+                }
                 if (provider == "SoundCloud") {
                     val clientId = soundCloudPrefs.getString("client_id", "").orEmpty()
                     if (clientId.isBlank()) {
@@ -389,6 +447,13 @@ class DiscoverActivity : ComponentActivity() {
 
     private fun searchAlbums(term: String) {
         val q = term.ifBlank { "new releases" }
+        if (provider == "Navidrome") {
+            albumMode = false
+            genreSection.visibility = android.view.View.VISIBLE
+            trendSection.visibility = android.view.View.VISIBLE
+            searchMusic(q)
+            return
+        }
         status.text = "Buscando álbumes en línea…"
         results.removeAllViews()
         Thread {
@@ -604,6 +669,66 @@ class DiscoverActivity : ComponentActivity() {
         c.play()
         nowPlaying.text = song.title
         status.text = "Reproduciendo por internet · los datos móviles pueden consumir tu plan."
+    }
+
+    private fun isNavidromeConfigured(): Boolean =
+        !navidromePrefs.getString("server_url", "").isNullOrBlank() &&
+        !navidromePrefs.getString("username", "").isNullOrBlank() &&
+        !navidromePrefs.getString("password", "").isNullOrBlank()
+
+    private fun md5(value: String): String = MessageDigest.getInstance("MD5")
+        .digest(value.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
+
+    private fun configureNavidrome() {
+        val serverInput = EditText(this).apply {
+            hint = "https://tu-servidor:4533"
+            setSingleLine(true)
+            setText(navidromePrefs.getString("server_url", "").orEmpty())
+            setTextColor(white); setHintTextColor(muted)
+            background = rounded(panel, 12); setPadding(dp(12), dp(10), dp(12), dp(10))
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI
+        }
+        val userInput = EditText(this).apply {
+            hint = "Usuario Navidrome"; setSingleLine(true)
+            setText(navidromePrefs.getString("username", "").orEmpty())
+            setTextColor(white); setHintTextColor(muted)
+            background = rounded(panel, 12); setPadding(dp(12), dp(10), dp(12), dp(10))
+        }
+        val passInput = EditText(this).apply {
+            hint = "Contraseña Navidrome"; setSingleLine(true)
+            setText(navidromePrefs.getString("password", "").orEmpty())
+            setTextColor(white); setHintTextColor(muted)
+            background = rounded(panel, 12); setPadding(dp(12), dp(10), dp(12), dp(10))
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+        }
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; setPadding(dp(8), dp(8), dp(8), 0)
+            addView(serverInput, LinearLayout.LayoutParams(-1, dp(50)))
+            addView(userInput, LinearLayout.LayoutParams(-1, dp(50)).apply { topMargin = dp(8) })
+            addView(passInput, LinearLayout.LayoutParams(-1, dp(50)).apply { topMargin = dp(8) })
+            addView(text("Necesitas tener Navidrome instalado y accesible en una dirección de red. Esta app se conecta por la API Subsonic; no instala ni aloja el servidor por sí sola. Usa HTTPS si te conectas desde fuera de tu red local.", 12f, muted, false).apply {
+                setPadding(0, dp(10), 0, 0)
+            })
+        }
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Conectar con Navidrome")
+            .setView(container)
+            .setNegativeButton("Cancelar", null)
+            .setPositiveButton("Guardar y buscar") { _, _ ->
+                val server = serverInput.text.toString().trim().trimEnd('/')
+                val username = userInput.text.toString().trim()
+                val password = passInput.text.toString()
+                if (!(server.startsWith("https://") || server.startsWith("http://")) || username.isBlank() || password.isBlank()) {
+                    Toast.makeText(this, "Introduce una URL http(s), usuario y contraseña.", Toast.LENGTH_LONG).show()
+                } else {
+                    navidromePrefs.edit().putString("server_url", server).putString("username", username)
+                        .putString("password", password).apply()
+                    provider = "Navidrome"; albumMode = false
+                    genreSection.visibility = android.view.View.VISIBLE
+                    trendSection.visibility = android.view.View.VISIBLE
+                    searchMusic(searchBox.text.toString().ifBlank { "music" })
+                }
+            }.show()
     }
 
     private fun configureJamendo() {
