@@ -40,6 +40,7 @@ class DiscoverActivity : ComponentActivity() {
     private val jamendoPrefs by lazy { getSharedPreferences("ritmo_jamendo", MODE_PRIVATE) }
     private val soundCloudPrefs by lazy { getSharedPreferences("ritmo_soundcloud", MODE_PRIVATE) }
     private val navidromePrefs by lazy { getSharedPreferences("ritmo_navidrome", MODE_PRIVATE) }
+    private val jellyfinPrefs by lazy { getSharedPreferences("ritmo_jellyfin", MODE_PRIVATE) }
     private lateinit var genreSection: LinearLayout
     private lateinit var trendSection: LinearLayout
 
@@ -137,11 +138,21 @@ class DiscoverActivity : ComponentActivity() {
                 searchMusic(searchBox.text.toString().ifBlank { "music" })
             }
         }, LinearLayout.LayoutParams(0, dp(38), 1f).apply { leftMargin = dp(5); rightMargin = dp(5) })
+        extraSourceRow.addView(button("Jellyfin", Color.rgb(0, 115, 170), white) {
+            provider = "Jellyfin"
+            if (!isJellyfinConfigured()) configureJellyfin()
+            else {
+                albumMode = false
+                genreSection.visibility = android.view.View.VISIBLE
+                trendSection.visibility = android.view.View.VISIBLE
+                searchMusic(searchBox.text.toString().ifBlank { "music" })
+            }
+        }, LinearLayout.LayoutParams(0, dp(38), 1f).apply { leftMargin = dp(5); rightMargin = dp(5) })
         extraSourceRow.addView(button("⚙ Fuentes", panel, white) {
             android.app.AlertDialog.Builder(this)
                 .setTitle("Configurar catálogos")
-                .setItems(arrayOf("Configurar Jamendo", "Configurar SoundCloud", "Configurar Navidrome")) { _, which ->
-                    when (which) { 0 -> configureJamendo(); 1 -> configureSoundCloud(); else -> configureNavidrome() }
+                .setItems(arrayOf("Configurar Jamendo", "Configurar SoundCloud", "Configurar Navidrome", "Configurar Jellyfin")) { _, which ->
+                    when (which) { 0 -> configureJamendo(); 1 -> configureSoundCloud(); 2 -> configureNavidrome(); else -> configureJellyfin() }
                 }.show()
         }, LinearLayout.LayoutParams(dp(105), dp(38)).apply { leftMargin = dp(5) })
         root.addView(extraSourceRow)
@@ -239,6 +250,65 @@ class DiscoverActivity : ComponentActivity() {
             try {
                 val encoded = URLEncoder.encode(q, "UTF-8")
                 val genreNames = setOf("Pop", "Latin", "Electronic", "Hip-Hop/Rap", "Rock", "Reggaeton", "Cumbia", "House", "Techno", "Trap", "R&B/Soul", "Reggae", "Dancehall", "Disco", "Jazz", "Classical", "Metal", "Alternative", "Punk", "Folk", "Country", "Blues", "Funk", "Acoustic", "Ambient", "Soundtrack", "Lo-Fi", "Hyperpop", "Trance", "Drum & Bass", "Dubstep", "Hardstyle", "Deep House", "Tech House", "Progressive House", "Future Bass", "Tropical House", "Jungle", "Vaporwave", "World", "Experimental", "Devotional", "Podcasts", "Comedy", "Kids", "Audiobooks")
+                if (provider == "Jellyfin") {
+                    val baseUrl = jellyfinPrefs.getString("server_url", "").orEmpty().trim().trimEnd('/')
+                    val username = jellyfinPrefs.getString("username", "").orEmpty().trim()
+                    val password = jellyfinPrefs.getString("password", "").orEmpty()
+                    if (baseUrl.isBlank() || username.isBlank() || password.isBlank()) {
+                        runOnUiThread { status.text = "Configura tu servidor Jellyfin en ⚙ Fuentes." }
+                        return@Thread
+                    }
+                    var token = jellyfinPrefs.getString("access_token", "").orEmpty()
+                    var userId = jellyfinPrefs.getString("user_id", "").orEmpty()
+                    if (token.isBlank() || userId.isBlank()) {
+                        val authConnection = URL(baseUrl + "/Users/AuthenticateByName").openConnection() as HttpURLConnection
+                        authConnection.requestMethod = "POST"
+                        authConnection.connectTimeout = 15000; authConnection.readTimeout = 20000
+                        authConnection.doOutput = true
+                        authConnection.setRequestProperty("Content-Type", "application/json")
+                        authConnection.setRequestProperty("X-Emby-Authorization", "MediaBrowser Client=\"Ritmo Offline\", Device=\"Android\", DeviceId=\"ritmo-offline-android\", Version=\"1.0\"")
+                        val body = JSONObject().put("Username", username).put("Pw", password).toString()
+                        authConnection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+                        val authText = authConnection.inputStream.bufferedReader().use { it.readText() }
+                        authConnection.disconnect()
+                        val authJson = JSONObject(authText)
+                        token = authJson.optString("AccessToken", "")
+                        userId = authJson.optJSONObject("User")?.optString("Id", "").orEmpty()
+                        if (token.isBlank() || userId.isBlank()) throw IllegalStateException("Jellyfin no devolvió credenciales")
+                        jellyfinPrefs.edit().putString("access_token", token).putString("user_id", userId).apply()
+                    }
+                    val endpoint = baseUrl + "/Items?searchTerm=" + URLEncoder.encode(q, "UTF-8") +
+                        "&includeItemTypes=Audio&recursive=true&fields=Genres,RunTimeTicks&limit=30&userId=" +
+                        URLEncoder.encode(userId, "UTF-8")
+                    connection = URL(endpoint).openConnection() as HttpURLConnection
+                    connection.connectTimeout = 15000; connection.readTimeout = 20000
+                    connection.setRequestProperty("X-Emby-Token", token)
+                    connection.setRequestProperty("X-Emby-Authorization", "MediaBrowser Client=\"Ritmo Offline\", Device=\"Android\", DeviceId=\"ritmo-offline-android\", Version=\"1.0\", Token=\"$token\"")
+                    val response = connection.inputStream.bufferedReader().use { it.readText() }
+                    val data = JSONObject(response).optJSONArray("Items")
+                    val tracks = mutableListOf<Song>()
+                    if (data != null) for (i in 0 until data.length()) {
+                        val item = data.optJSONObject(i) ?: continue
+                        val id = item.optString("Id", "")
+                        if (id.isBlank()) continue
+                        val streamUrl = baseUrl + "/Audio/" + URLEncoder.encode(id, "UTF-8") +
+                            "/stream?static=true&api_key=" + URLEncoder.encode(token, "UTF-8")
+                        val artwork = baseUrl + "/Items/" + URLEncoder.encode(id, "UTF-8") +
+                            "/Images/Primary?maxWidth=500&api_key=" + URLEncoder.encode(token, "UTF-8")
+                        val ticks = item.optLong("RunTimeTicks", 0L)
+                        tracks.add(Song(id, item.optString("Name", "Audio sin título"),
+                            item.optString("AlbumArtist", item.optJSONArray("Artists")?.optString(0) ?: "Artista"),
+                            artwork, (ticks / 10_000_000L).toInt(), "Jellyfin · biblioteca personal", streamUrl))
+                    }
+                    runOnUiThread {
+                        if (tracks.isEmpty()) status.text = "No se encontraron canciones en Jellyfin. Comprueba que tu biblioteca contenga música."
+                        else {
+                            status.text = tracks.size.toString() + " canciones de Jellyfin · reproducción en segundo plano"
+                            tracks.forEach { addSongCard(it) }
+                        }
+                    }
+                    return@Thread
+                }
                 if (provider == "Navidrome") {
                     val baseUrl = navidromePrefs.getString("server_url", "").orEmpty().trim().trimEnd('/')
                     val username = navidromePrefs.getString("username", "").orEmpty().trim()
@@ -447,7 +517,7 @@ class DiscoverActivity : ComponentActivity() {
 
     private fun searchAlbums(term: String) {
         val q = term.ifBlank { "new releases" }
-        if (provider == "Navidrome") {
+        if (provider == "Navidrome" || provider == "Jellyfin") {
             albumMode = false
             genreSection.visibility = android.view.View.VISIBLE
             trendSection.visibility = android.view.View.VISIBLE
@@ -669,6 +739,63 @@ class DiscoverActivity : ComponentActivity() {
         c.play()
         nowPlaying.text = song.title
         status.text = "Reproduciendo por internet · los datos móviles pueden consumir tu plan."
+    }
+
+    private fun isJellyfinConfigured(): Boolean =
+        !jellyfinPrefs.getString("server_url", "").isNullOrBlank() &&
+        !jellyfinPrefs.getString("username", "").isNullOrBlank() &&
+        !jellyfinPrefs.getString("password", "").isNullOrBlank()
+
+    private fun configureJellyfin() {
+        val serverInput = EditText(this).apply {
+            hint = "http(s)://tu-servidor:8096"
+            setSingleLine(true)
+            setText(jellyfinPrefs.getString("server_url", "").orEmpty())
+            setTextColor(white); setHintTextColor(muted)
+            background = rounded(panel, 12); setPadding(dp(12), dp(10), dp(12), dp(10))
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI
+        }
+        val userInput = EditText(this).apply {
+            hint = "Usuario Jellyfin"; setSingleLine(true)
+            setText(jellyfinPrefs.getString("username", "").orEmpty())
+            setTextColor(white); setHintTextColor(muted)
+            background = rounded(panel, 12); setPadding(dp(12), dp(10), dp(12), dp(10))
+        }
+        val passInput = EditText(this).apply {
+            hint = "Contraseña Jellyfin"; setSingleLine(true)
+            setText(jellyfinPrefs.getString("password", "").orEmpty())
+            setTextColor(white); setHintTextColor(muted)
+            background = rounded(panel, 12); setPadding(dp(12), dp(10), dp(12), dp(10))
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+        }
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; setPadding(dp(8), dp(8), dp(8), 0)
+            addView(serverInput, LinearLayout.LayoutParams(-1, dp(50)))
+            addView(userInput, LinearLayout.LayoutParams(-1, dp(50)).apply { topMargin = dp(8) })
+            addView(passInput, LinearLayout.LayoutParams(-1, dp(50)).apply { topMargin = dp(8) })
+            addView(text("Conecta con tu servidor Jellyfin y busca audio de tu biblioteca. Debes tener Jellyfin instalado y accesible en la red. Usa HTTPS cuando te conectes desde fuera de casa.", 12f, muted, false).apply {
+                setPadding(0, dp(10), 0, 0)
+            })
+        }
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Conectar con Jellyfin")
+            .setView(container)
+            .setNegativeButton("Cancelar", null)
+            .setPositiveButton("Guardar y buscar") { _, _ ->
+                val server = serverInput.text.toString().trim().trimEnd('/')
+                val username = userInput.text.toString().trim()
+                val password = passInput.text.toString()
+                if (!(server.startsWith("https://") || server.startsWith("http://")) || username.isBlank() || password.isBlank()) {
+                    Toast.makeText(this, "Introduce una URL http(s), usuario y contraseña.", Toast.LENGTH_LONG).show()
+                } else {
+                    jellyfinPrefs.edit().putString("server_url", server).putString("username", username)
+                        .putString("password", password).remove("access_token").remove("user_id").apply()
+                    provider = "Jellyfin"; albumMode = false
+                    genreSection.visibility = android.view.View.VISIBLE
+                    trendSection.visibility = android.view.View.VISIBLE
+                    searchMusic(searchBox.text.toString().ifBlank { "music" })
+                }
+            }.show()
     }
 
     private fun isNavidromeConfigured(): Boolean =
