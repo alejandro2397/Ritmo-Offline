@@ -35,6 +35,8 @@ class DiscoverActivity : ComponentActivity() {
     private lateinit var personalizedRow: LinearLayout
     private lateinit var nowPlaying: TextView
     private var controller: MediaController? = null
+    private val queueSongs = mutableListOf<Song>()
+    private lateinit var repeatButton: TextView
     private var albumMode = false
     private var provider = "Audius"
     private val jamendoPrefs by lazy { getSharedPreferences("ritmo_jamendo", MODE_PRIVATE) }
@@ -198,6 +200,18 @@ class DiscoverActivity : ComponentActivity() {
             maxLines = 2; setPadding(dp(10), 0, dp(6), 0)
         }
         player.addView(nowPlaying, LinearLayout.LayoutParams(0, -2, 1f))
+        repeatButton = button("↻ OFF", Color.rgb(55, 55, 55), white) {
+            val c = controller
+            if (c != null) {
+                c.repeatMode = when (c.repeatMode) {
+                    Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ONE
+                    Player.REPEAT_MODE_ONE -> Player.REPEAT_MODE_ALL
+                    else -> Player.REPEAT_MODE_OFF
+                }
+                updateRepeatButton(c.repeatMode)
+            }
+        }
+        player.addView(repeatButton, LinearLayout.LayoutParams(dp(62), dp(44)).apply { rightMargin = dp(5) })
         player.addView(button("▶", red, white) {
             val c = controller
             if (c != null) {
@@ -219,7 +233,11 @@ class DiscoverActivity : ComponentActivity() {
         future.addListener({
             try {
                 controller = future.get()
+                updateRepeatButton(controller?.repeatMode ?: Player.REPEAT_MODE_OFF)
                 controller?.addListener(object : Player.Listener {
+                    override fun onRepeatModeChanged(repeatMode: Int) {
+                        updateRepeatButton(repeatMode)
+                    }
                     override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                         nowPlaying.text = mediaItem?.mediaMetadata?.title ?: "Elige una canción para reproducir"
                     }
@@ -245,6 +263,7 @@ class DiscoverActivity : ComponentActivity() {
         refreshPersonalized()
         status.text = "Buscando música en línea…"
         results.removeAllViews()
+        queueSongs.clear()
         Thread {
             var connection: HttpURLConnection? = null
             try {
@@ -698,6 +717,7 @@ class DiscoverActivity : ComponentActivity() {
     }
 
     private fun addSongCard(song: Song) {
+        if (queueSongs.none { it.id == song.id && it.streamUrl == song.streamUrl }) queueSongs.add(song)
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
             background = rounded(panel, 16); setPadding(dp(10), dp(10), dp(10), dp(10))
@@ -727,18 +747,40 @@ class DiscoverActivity : ComponentActivity() {
             status.text = "El reproductor se está preparando. Toca reproducir otra vez."
             return
         }
-        val streamUri = Uri.parse(song.streamUrl.ifBlank { "https://api.audius.co/v1/tracks/" + Uri.encode(song.id) + "/stream?app_name=RitmoOffline" })
-        val metadata = MediaMetadata.Builder()
-            .setTitle(song.title)
-            .setArtist(song.creator)
-            .apply { if (song.artwork.isNotBlank()) setArtworkUri(Uri.parse(song.artwork)) }
-            .build()
-        val item = MediaItem.Builder().setUri(streamUri).setMediaMetadata(metadata).build()
-        c.setMediaItem(item)
-        c.prepare()
-        c.play()
+        fun toMediaItem(track: Song): MediaItem {
+            val streamUri = Uri.parse(track.streamUrl.ifBlank {
+                "https://api.audius.co/v1/tracks/" + Uri.encode(track.id) + "/stream?app_name=RitmoOffline"
+            })
+            val metadata = MediaMetadata.Builder()
+                .setTitle(track.title)
+                .setArtist(track.creator)
+                .apply { if (track.artwork.isNotBlank()) setArtworkUri(Uri.parse(track.artwork)) }
+                .build()
+            return MediaItem.Builder().setUri(streamUri).setMediaMetadata(metadata).build()
+        }
+        val currentQueue = queueSongs.toList()
+        val selectedIndex = currentQueue.indexOfFirst { it.id == song.id && it.streamUrl == song.streamUrl }
+        if (currentQueue.isNotEmpty() && selectedIndex >= 0) {
+            c.setMediaItems(currentQueue.map { toMediaItem(it) }, selectedIndex, 0L)
+            c.prepare()
+            c.play()
+            status.text = "Cola de reproducción · ${currentQueue.size} canciones"
+        } else {
+            c.setMediaItem(toMediaItem(song))
+            c.prepare()
+            c.play()
+            status.text = "Reproduciendo por internet · los datos móviles pueden consumir tu plan."
+        }
         nowPlaying.text = song.title
-        status.text = "Reproduciendo por internet · los datos móviles pueden consumir tu plan."
+    }
+
+    private fun updateRepeatButton(mode: Int) {
+        if (!::repeatButton.isInitialized) return
+        repeatButton.text = when (mode) {
+            Player.REPEAT_MODE_ONE -> "↻ 1"
+            Player.REPEAT_MODE_ALL -> "↻ ALL"
+            else -> "↻ OFF"
+        }
     }
 
     private fun isJellyfinConfigured(): Boolean =
